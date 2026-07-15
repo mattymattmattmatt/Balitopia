@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>Balitopia: Guardians of the Broken Cages</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🏝</text></svg>">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<canvas id="game"></canvas>
+
+<!-- ===== HUD (in-game) ===== -->
+<div id="hud" class="hidden">
+  <div id="hud-top-left">
+    <div id="hp-wrap"><div id="hp-bar"></div><span id="hp-text"></span></div>
+    <div id="xp-wrap"><div id="xp-bar"></div><span id="lvl-text">LV 1</span></div>
+  </div>
+  <div id="hud-top-center">
+    <div id="timer">0:00</div>
+    <div id="boss-hp-wrap" class="hidden"><div id="boss-hp-bar"></div><span>KING GLOB</span></div>
+  </div>
+  <div id="hud-top-right">
+    <div id="kills">☠ 0</div>
+    <div id="freed">⛓ 1/24</div>
+    <button id="btn-roster">☰</button>
+    <button id="btn-mute">♪</button>
+  </div>
+  <div id="facecard-strip"></div>
+  <div id="banner" class="hidden"></div>
+</div>
+
+<!-- ===== Title / Story ===== -->
+<div id="screen-title" class="screen">
+  <h1>BALITOPIA</h1>
+  <h2>Guardians of the Broken Cages</h2>
+  <div id="story-box"></div>
+  <button class="big-btn" id="btn-title-continue">BEGIN</button>
+  <p class="hint">best played in landscape · sound on 🔊</p>
+</div>
+
+<!-- ===== Hero Select ===== -->
+<div id="screen-select" class="screen hidden">
+  <h2 class="select-title">CHOOSE YOUR GUARDIAN</h2>
+  <p class="select-sub">The other 23 are caged across the island. Break them free — they fight beside you, and their bodies are yours to possess.</p>
+  <div id="hero-grid"></div>
+  <div id="hero-detail" class="hidden">
+    <div id="hero-detail-portrait"></div>
+    <div id="hero-detail-text">
+      <h3 id="hero-detail-name"></h3>
+      <p id="hero-detail-power"></p>
+      <p id="hero-detail-desc"></p>
+    </div>
+    <button class="big-btn" id="btn-start">FIGHT!</button>
+  </div>
+</div>
+
+<!-- ===== Roster (in-game possession grid) ===== -->
+<div id="screen-roster" class="screen hidden">
+  <h2 class="select-title">GUARDIANS</h2>
+  <p class="select-sub">Tap a freed guardian to possess them</p>
+  <div id="roster-grid"></div>
+  <button class="big-btn" id="btn-roster-close">RESUME</button>
+</div>
+
+<!-- ===== Level Up ===== -->
+<div id="screen-levelup" class="screen hidden">
+  <h2 class="select-title">LEVEL UP!</h2>
+  <div id="upgrade-row"></div>
+</div>
+
+<!-- ===== Game Over / Victory ===== -->
+<div id="screen-over" class="screen hidden">
+  <h1 id="over-title"></h1>
+  <div id="over-story"></div>
+  <div id="over-stats"></div>
+  <button class="big-btn" id="btn-retry">PLAY AGAIN</button>
+</div>
+
+<!-- ===== Rotate overlay ===== -->
+<div id="rotate-overlay"><div>⟳<br>Please rotate your device<br><small>Balitopia is played in landscape</small></div></div>
+
+<script src="js/data.js"></script>
+<script src="js/sprites.js"></script>
+<script src="js/audio.js"></script>
+<script src="js/game.js"></script>
+</body>
+</html>
