@@ -24,6 +24,16 @@ html, body {
   touch-action:pan-y;
 }
 
+#screen-title {
+  background:
+    linear-gradient(rgba(4,16,22,.78), rgba(4,16,22,.93)),
+    url('../assets/img/title_bg.jpg') center/cover no-repeat #041016;
+}
+#poster-row { display:flex; gap:10px; justify-content:center; margin-top:10px; }
+#poster-row figure { text-align:center; }
+#poster-row img { height:11vh; min-height:64px; border-radius:8px; border:2px solid rgba(255,213,79,.5); display:block; }
+#poster-row figcaption { font-size:9px; letter-spacing:2px; color:#ffd54f; margin-top:2px; }
+
 #screen-title h1 {
   font-size:clamp(38px,9vh,72px); letter-spacing:6px; color:#ffd54f;
   text-shadow:0 3px 0 #a04b00, 0 6px 18px rgba(0,0,0,.6);

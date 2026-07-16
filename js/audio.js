@@ -123,14 +123,59 @@ const Sound = (() => {
     step = 0;
     musicTimer = setInterval(playStep, 145);
   }
-  function stopMusic() {
+  function stopSynthMusic() {
     if (musicTimer) { clearInterval(musicTimer); musicTimer = null; }
   }
+
+  // ------- file-based audio (the real soundtrack from assets/audio) -------
+  let musicEl = null, previewEl = null;
+  const fileCache = {};
+
+  function playMusic(path, opts) {
+    // path is relative to assets/audio/, e.g. 'music/title.mp3' or 'enemies/glob.mp3'
+    const { loop = true, vol = 0.55 } = opts || {};
+    stopMusic();
+    const el = new Audio('assets/audio/' + path);
+    el.loop = loop;
+    el.volume = vol;
+    el.muted = muted;
+    el.play().catch(() => { if (loop) startMusic(); });   // synth fallback (e.g. file:// runs)
+    el.onerror = () => { if (loop && musicEl === el) startMusic(); };
+    musicEl = el;
+  }
+  function stopMusic() {
+    stopSynthMusic();
+    if (musicEl) { musicEl.pause(); musicEl = null; }
+  }
+
+  function playFile(path, vol) {
+    if (muted) return;
+    let a = fileCache[path];
+    if (!a) { a = new Audio(path); fileCache[path] = a; }
+    a.volume = vol === undefined ? 0.9 : vol;
+    try { a.currentTime = 0; } catch (e) {}
+    a.play().catch(() => {});
+  }
+
+  // hero theme preview on the select screen (one at a time)
+  function preview(path) {
+    stopPreview();
+    previewEl = new Audio(path);
+    previewEl.volume = 0.6;
+    previewEl.muted = muted;
+    previewEl.play().catch(() => {});
+  }
+  function stopPreview() {
+    if (previewEl) { previewEl.pause(); previewEl = null; }
+  }
+
   function toggleMute() {
     muted = !muted;
     if (master) master.gain.value = muted ? 0 : 0.85;
+    if (musicEl) musicEl.muted = muted;
+    if (previewEl) previewEl.muted = muted;
     return muted;
   }
 
-  return { ensure, sfx: S, startMusic, stopMusic, toggleMute, get muted() { return muted; } };
+  return { ensure, sfx: S, startMusic, stopMusic, playMusic, playFile, preview, stopPreview, toggleMute, get muted() { return muted; } };
 })();

@@ -42,11 +42,16 @@ when the ground begins to shake... make the Hunger go hungry.
 
 ## 🦸 The 24 Guardians
 
-Every hero has a unique auto-power: piercing waves, exploding fire, chain lightning, orbiting
-moons, poison seeds, quake rings, boomerang gales, slowing ice, petal storms, giant hammers,
-homing spirits, solar beams, crush auras, splitting bolts, thunder novas, sniper arrows, dagger
-flurries, burning trails, door-sized waves, junk storms, stolen stars, spear sweeps, and one
-blade nobody has ever seen.
+Bo · Chocker · Chomper · Chunky · Cliggy · Creeper · Diver · Fertle · Fixie · Flick · Fygar ·
+Gus · Peeta-Heater · Roger-Dodger · Sixter · Skyjumper · Snapper · Stinger · Swack · Waterwolf ·
+Whipper · Yellogen · Yelp · Zappo
+
+Every Guardian has a unique auto-power: rainbow feather fans, poison clouds, thunder bites,
+junk storms, egg mortars, laser stares, sky dives, exploding shellfire, slowing icicles,
+burning trails, fang flurries, crush coils, scalding jets, boomerang wings, star shrapnel,
+orbiting stars, clap quakes, lance sweeps, door-sized waves, tidal howls, homing echoes,
+shatter screeches, echo orbs, and chain lightning. Tap a hero on the select screen to hear
+their theme song.
 
 ## 🛠 Running It
 
@@ -61,9 +66,11 @@ Then open it on your phone (same Wi-Fi → `http://<your-ip>:8000`) and rotate t
 Opening `index.html` directly also works in most browsers (the game is fully self-contained;
 custom art via `assets/manifest.json` just won't load over `file://`).
 
-## 🎨 Custom Art
+## 🎨 Art & Sound
 
-All art is procedurally drawn in code, so the game needs zero asset files — but every sprite
-can be replaced with your own PNGs. See **[ASSETS.md](ASSETS.md)** for the full design list
-(filenames, sizes, and style notes). Drop files into `assets/img/` and list them in
-`assets/manifest.json`.
+The game runs on the real Balitopia art set: hand-made portraits and full-body renders for
+all 24 Guardians, painted enemy art with 6 runtime power-tier tints, per-hero theme songs and
+entrance stingers, region battle music, and a full King Glob voice set. See
+**[ASSETS.md](ASSETS.md)** for the asset layout, how each file is used, and the short list of
+art still wanted (Bo's full-body render tops it). Anything missing falls back to procedural
+code-drawn art, so the game always runs.
