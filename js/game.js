@@ -198,6 +198,16 @@ function spawnWave(dt) {
     if (t > 210 && r < Math.min(0.05, (t - 210) / 7000)) type = 'clubbo';
     else if (t > 75 && r < Math.min(0.14, 0.025 + t / 2400)) type = 'demonder';
     spawnEnemy(type, tier, x, y);
+    // herald the first elite of each kind
+    if (type === 'demonder' && !G.sawDemonder) {
+      G.sawDemonder = true;
+      banner('A DEMONDER STALKS THE JUNGLE!');
+      Sound.playFile('assets/audio/enemies/demonder_entrance.wav', 0.85);
+    } else if (type === 'clubbo' && !G.sawClubbo) {
+      G.sawClubbo = true;
+      banner('CLUBBO! RUN. OR DON\'T.');
+      Sound.playFile('assets/audio/enemies/clubbo_entrance.wav', 0.9);
+    }
   }
 }
 
@@ -236,9 +246,14 @@ function killEnemy(e) {
   dropGem(e.x, e.y, e.xp);
   const tint = `hsl(${TIERS[e.tier].hue},65%,55%)`;
   spawnParts(e.x, e.y, tint, e.type === 'minyar' ? 6 : 12, 140);
-  if (e.type === 'clubbo') { Sound.sfx.bigKill(); G.shake = Math.max(G.shake, 6); if (Math.random() < 0.4) hearts.push({ x: e.x, y: e.y, t: 0 }); }
-  else if (e.type === 'demonder') { Sound.sfx.kill(); if (Math.random() < 0.14) hearts.push({ x: e.x, y: e.y, t: 0 }); }
-  else if (Math.random() < 0.25) Sound.sfx.kill();
+  if (e.type === 'clubbo') {
+    Sound.playFile('assets/audio/enemies/clubbo_defeat.wav', 0.85);
+    G.shake = Math.max(G.shake, 6);
+    if (Math.random() < 0.4) hearts.push({ x: e.x, y: e.y, t: 0 });
+  } else if (e.type === 'demonder') {
+    Sound.playFile('assets/audio/enemies/demonder_defeat.wav', 0.7);
+    if (Math.random() < 0.14) hearts.push({ x: e.x, y: e.y, t: 0 });
+  } else if (Math.random() < 0.25) Sound.sfx.kill();
 }
 
 function damageEnemy(e, dmg, o) {
@@ -270,7 +285,8 @@ function damageBoss(dmg, o) {
     G.shake = 18;
     spawnParts(b.x, b.y, '#8bc34a', 60, 260);
     spawnParts(b.x, b.y, '#ffd54f', 40, 200);
-    Sound.sfx.victory();
+    Sound.playFile('assets/audio/enemies/glob_defeat.wav', 1);
+    setTimeout(() => Sound.playFile('assets/audio/sfx/crown_crack.wav', 0.9), 900);
     endGame(true);
   }
 }
@@ -290,7 +306,8 @@ function breakCage(c) {
   freedSet.add(c.heroIdx);
   spawnParts(c.x, c.y, '#d7a86e', 20, 190);
   spawnParts(c.x, c.y, HEROES[c.heroIdx].accent, 16, 160);
-  Sound.sfx.cageBreak();
+  Sound.playFile('assets/audio/sfx/shatter.wav', 0.8);
+  Sound.playFile(`assets/audio/heroes/${HEROES[c.heroIdx].id}_entrance.wav`, 0.9);
   G.healPct(0.25);
   banner(`${HEROES[c.heroIdx].name.toUpperCase()} JOINED THE FIGHT!`);
   rebuildStrip();
@@ -314,7 +331,7 @@ function spawnProj(o) {
     Object.assign(p, {
       alive: true, x: o.x, y: o.y, vx: o.vx, vy: o.vy,
       dmg: o.dmg, pierce: o.pierce || 0, size: o.size || 6, life: o.life || 1.2,
-      color: o.color, homing: !!o.homing, boomerang: !!o.boomerang, returning: false,
+      color: o.color, rainbow: !!o.rainbow, homing: !!o.homing, boomerang: !!o.boomerang, returning: false,
       explode: o.explode || 0, split: !!o.split, slow: o.slow || 0,
       poison: o.poison || 0, poisonT: o.poisonT || 0, knock: o.knock || 0,
       owner: o.owner || null, t: 0, hitCd: 0,
@@ -509,7 +526,7 @@ function fireWeapon(f, w, ws, isAlly, dt) {
       x: f.x, y: f.y - 12,
       vx: Math.cos(a) * w.speed, vy: Math.sin(a) * w.speed,
       dmg: w.dmg * dmgMul, pierce: w.pierce, size: w.size * areaMul, life: w.life,
-      color: w.color, homing: w.homing, boomerang: w.boomerang, explode: w.explode ? w.explode * areaMul : 0,
+      color: w.color, rainbow: w.rainbow, homing: w.homing, boomerang: w.boomerang, explode: w.explode ? w.explode * areaMul : 0,
       split: w.split, slow: w.slow, poison: w.poison ? w.poison * dmgMul / Math.max(1, w.dmg) * w.dmg : 0,
       poisonT: w.poisonT, knock: w.knock, owner: f,
     });
@@ -677,10 +694,12 @@ function spawnBoss() {
     x: Math.min(WORLD - 200, Math.max(200, player.x + Math.cos(a) * 640)),
     y: Math.min(WORLD - 200, Math.max(200, player.y + Math.sin(a) * 640)),
     hp: BOSS.hp, maxhp: BOSS.hp, r: BOSS.r, spd: BOSS.spd, dmg: BOSS.dmg,
-    slowT: 0, flash: 0, wob: 0,
+    slowT: 0, flash: 0, wob: 0, enraged: false,
     volleyCd: 4, summonCd: 8, slamCd: 12,
   };
-  Sound.sfx.bossRoar();
+  Sound.playMusic('enemies/glob.mp3');                      // King Glob's theme
+  Sound.playFile('assets/audio/enemies/glob_entrance.wav', 0.95);
+  setTimeout(() => Sound.playFile('assets/audio/enemies/glob_laugh.wav', 0.9), 1400);
   G.shake = 14;
   banner('👑 KING GLOB HAS ARRIVED 👑');
   document.getElementById('boss-hp-wrap').classList.remove('hidden');
@@ -690,6 +709,13 @@ function updateBoss(dt) {
   const b = G.boss;
   if (!b || !b.alive) return;
   b.flash -= dt; b.slowT -= dt; b.wob += dt;
+  if (!b.enraged && b.hp < b.maxhp / 2) {
+    b.enraged = true;
+    b.spd *= 1.3;
+    Sound.playFile('assets/audio/enemies/glob_enrage.wav', 0.95);
+    banner('KING GLOB IS FURIOUS!');
+    G.shake = Math.max(G.shake, 10);
+  }
   const dx = player.x - b.x, dy = player.y - b.y;
   const d = Math.hypot(dx, dy) || 1;
   const sp = b.spd * (b.slowT > 0 ? 0.6 : 1);
@@ -699,7 +725,7 @@ function updateBoss(dt) {
 
   b.volleyCd -= dt;
   if (b.volleyCd <= 0) {
-    b.volleyCd = 5 + Math.random() * 2;
+    b.volleyCd = (b.enraged ? 3.2 : 5) + Math.random() * 2;
     const base = Math.atan2(dy, dx);
     for (let i = 0; i < 10; i++) {
       const a = base + (i - 4.5) * 0.14;
@@ -796,7 +822,7 @@ function updatePickups(dt) {
     if ((h.x - player.x) ** 2 + (h.y - player.y) ** 2 < 26 * 26) {
       hearts.splice(i, 1);
       player.hp = Math.min(maxHP(), player.hp + 20);
-      Sound.sfx.heal();
+      Sound.playFile('assets/audio/sfx/catch.wav', 0.7);
       addFloater(player.x, player.y - 40, '+20', '#69f0ae');
     }
   }
@@ -1015,8 +1041,9 @@ function render(dt) {
     const e = enemies[i];
     if (!e.alive || !onScreen(e.x, e.y, 90)) continue;
     const spr = Sprites.get(e.type + e.tier);
-    const w = spr.width * e.scale, h = spr.height * e.scale;
-    shadow(e.x, e.y + 2, w * 0.8);
+    const h = ENEMIES[e.type].dh * e.scale;
+    const w = spr.width / spr.height * h;
+    shadow(e.x, e.y + 2, w * 0.9);
     const squash = 1 + Math.sin(G.time * 9 + e.wob) * 0.05;
     ctx.drawImage(spr, e.x - w / 2, e.y - h * squash + 6, w, h * squash);
     if (e.flash > 0) {
@@ -1056,8 +1083,8 @@ function render(dt) {
   const drawFighter = (f, isPlayer) => {
     if (!onScreen(f.x, f.y, 60)) return;
     const spr = Sprites.get('body' + f.heroIdx);
-    const w = spr.width / 2, h = spr.height / 2;
-    shadow(f.x, f.y + 2, 34);
+    const h = 48, w = spr.width / spr.height * h;
+    shadow(f.x, f.y + 2, Math.min(44, w * 0.9));
     const bob = Math.sin(G.time * 10 + f.bob) * 1.5;
     ctx.save();
     ctx.translate(f.x, f.y + bob);
@@ -1080,7 +1107,7 @@ function render(dt) {
       for (let k = 0; k < w2.count; k++) {
         const a = ws.ang + k / w2.count * 6.283;
         const ox = f.x + Math.cos(a) * R, oy = f.y + Math.sin(a) * R;
-        ctx.fillStyle = w2.color;
+        ctx.fillStyle = w2.rainbow ? `hsl(${(G.time * 200 + k * 72) % 360},95%,68%)` : w2.color;
         ctx.beginPath(); ctx.arc(ox, oy, w2.size, 0, 7); ctx.fill();
         ctx.globalAlpha = 0.4;
         ctx.beginPath(); ctx.arc(ox - Math.cos(a + 1.2) * 6, oy - Math.sin(a + 1.2) * 6, w2.size * 0.6, 0, 7); ctx.fill();
@@ -1095,9 +1122,9 @@ function render(dt) {
   if (G.boss && G.boss.alive) {
     const b = G.boss;
     const spr = Sprites.get('boss');
-    shadow(b.x, b.y + 6, 180);
     const squash = 1 + Math.sin(b.wob * 3) * 0.04;
-    const w = spr.width, h = spr.height * squash;
+    const h = BOSS.dh * squash, w = spr.width / spr.height * BOSS.dh;
+    shadow(b.x, b.y + 6, w * 1.05);
     ctx.drawImage(spr, b.x - w / 2, b.y - h + 20, w, h);
     if (b.flash > 0) {
       ctx.globalAlpha = 0.4; ctx.fillStyle = '#fff';
@@ -1109,7 +1136,7 @@ function render(dt) {
   // ---- projectiles ----
   for (const p of projs) {
     if (!p.alive || !onScreen(p.x, p.y, 30)) continue;
-    ctx.fillStyle = p.color;
+    ctx.fillStyle = p.rainbow ? `hsl(${(G.time * 240 + p.x) % 360},95%,65%)` : p.color;
     ctx.beginPath(); ctx.arc(p.x, p.y, p.size, 0, 7); ctx.fill();
     ctx.globalAlpha = 0.35;
     ctx.beginPath(); ctx.arc(p.x - p.vx * 0.02, p.y - p.vy * 0.02, p.size * 0.7, 0, 7); ctx.fill();
@@ -1282,6 +1309,7 @@ function possess(idx) {
   spawnParts(player.x, player.y, '#ffd54f', 16, 170);
   spawnParts(al.x, al.y, '#b39ddb', 10, 130);
   Sound.sfx.possess();
+  Sound.playFile(`assets/audio/heroes/${HEROES[idx].id}_entrance.wav`, 0.8);
   banner(`YOU ARE NOW ${HEROES[idx].name.toUpperCase()}`);
   rebuildStrip();
 }
@@ -1339,6 +1367,7 @@ function newGame(heroIdx) {
   G.running = true; G.over = false; G.victory = false; G.pendingLv = 0;
   G.time = 0; G.kills = 0; G.level = 1; G.xp = 0; G.xpNext = 10;
   G.spawnAcc = 0; G.boss = null; G.bossWarned = false; G.shake = 0;
+  G.sawDemonder = false; G.sawClubbo = false;
   G.mods = { dmg: 1, rate: 1, spd: 1, hpBonus: 0, ally: 1, magnet: 1, regen: 0, area: 1 };
 
   for (const e of enemies) e.alive = false;
@@ -1389,7 +1418,10 @@ function newGame(heroIdx) {
   $('hud').classList.remove('hidden');
   updateHudCounts();
   rebuildStrip();
-  Sound.startMusic();
+  Sound.stopPreview();
+  const region = ['region-land', 'region-sea', 'region-sky'][(Math.random() * 3) | 0];
+  Sound.playMusic(`music/${region}.mp3`);
+  Sound.playFile(`assets/audio/heroes/${HEROES[heroIdx].id}_entrance.wav`, 0.9);
   banner(`${HEROES[heroIdx].name.toUpperCase()} — BREAK THE CAGES!`);
 }
 
@@ -1397,7 +1429,11 @@ function endGame(won) {
   if (G.over) return;
   G.over = true; G.victory = won;
   Sound.stopMusic();
-  if (!won) Sound.sfx.defeat();
+  if (won) Sound.playMusic('music/victory.mp3', { loop: false, vol: 0.65 });
+  else {
+    Sound.playFile('assets/audio/sfx/captured.mp3', 0.9);
+    setTimeout(() => { if (G.over && !G.victory) Sound.playMusic('music/bgm_gameover.mp3', { loop: false, vol: 0.6 }); }, 1800);
+  }
 
   // persist bests
   try {
@@ -1427,9 +1463,15 @@ function endGame(won) {
 // ---------------- Menus ----------------
 let selectedHero = 0;
 function buildTitle() {
-  $('story-box').innerHTML = STORY.intro.map(p => `<p>${p}</p>`).join('');
+  $('story-box').innerHTML = STORY.intro.map(p => `<p>${p}</p>`).join('') +
+    `<div id="poster-row">
+       <figure><img src="assets/img/poster_minyar.jpg" alt="Minyar"><figcaption>MINYAR</figcaption></figure>
+       <figure><img src="assets/img/poster_demonder.jpg" alt="Demonder"><figcaption>DEMONDER</figcaption></figure>
+       <figure><img src="assets/img/poster_clubbo.jpg" alt="Clubbo"><figcaption>CLUBBO</figcaption></figure>
+     </div>`;
   $('btn-title-continue').addEventListener('click', () => {
     Sound.ensure();
+    Sound.playMusic('music/title.mp3');
     try { screen.orientation && screen.orientation.lock && screen.orientation.lock('landscape').catch(() => {}); } catch (e) {}
     try {
       const fs = document.documentElement.requestFullscreen && document.documentElement.requestFullscreen();
@@ -1454,6 +1496,7 @@ function buildSelect() {
       selectedHero = i;
       grid.querySelectorAll('.hero-card').forEach(c => c.classList.toggle('selected', +c.dataset.idx === i));
       showDetail(i);
+      Sound.preview(`assets/audio/heroes/${HEROES[i].id}.mp3`);   // hero theme snippet
     });
     grid.appendChild(card);
   });
@@ -1477,6 +1520,7 @@ function wire() {
     $('screen-over').classList.add('hidden');
     buildSelect();
     $('screen-select').classList.remove('hidden');
+    Sound.playMusic('music/title.mp3');
   });
   $('btn-roster').addEventListener('click', () => {
     if ($('screen-roster').classList.contains('hidden')) openRoster();

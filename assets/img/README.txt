@@ -1,1 +1,1 @@
-Drop custom PNGs here and list them in ../manifest.json — see ASSETS.md
+Game art lives here (generated from assets/art originals — see ASSETS.md).
