@@ -427,3 +427,9 @@ html, body {
 }
 #rotate-overlay small { font-size:13px; opacity:.7; }
 @media (orientation:portrait) { #rotate-overlay { display:flex; } }
+
+/* respect users who prefer reduced motion: stop the pulsing/bouncing loops */
+@media (prefers-reduced-motion: reduce) {
+  .facecard.ready, .facecard .fc-zap, .newbest { animation:none; }
+  .facecard.ready { box-shadow:0 0 10px 3px var(--glow, #ffd54f); }
+}
