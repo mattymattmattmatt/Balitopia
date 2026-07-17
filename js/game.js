@@ -911,9 +911,10 @@ function updatePickups(dt) {
     }
     if ((h.x - player.x) ** 2 + (h.y - player.y) ** 2 < 26 * 26) {
       hearts.splice(i, 1);
-      player.hp = Math.min(maxHP(), player.hp + 20);
+      const healAmt = Math.max(20, Math.round(maxHP() * 0.2));   // scales with HP pool
+      player.hp = Math.min(maxHP(), player.hp + healAmt);
       Sound.sfx.heal();
-      addFloater(player.x, player.y - 40, '+20', '#69f0ae');
+      addFloater(player.x, player.y - 40, '+' + healAmt, '#69f0ae');
     }
   }
   for (let i = patches.length - 1; i >= 0; i--) {
@@ -1405,22 +1406,41 @@ function updateHud(dt) {
   setHud('kills', 't', '☠ ' + G.kills);
   if (G.boss && G.boss.alive)
     setHud('boss-hp-bar', 'w', Math.max(0, G.boss.hp / G.boss.maxhp * 100).toFixed(1) + '%');
+  // King Glob countdown from 6:00 — lets players plan their cage route
+  const etaOn = !G.boss && G.time > BOSS_TIME - 120 && G.time < BOSS_TIME;
+  if (hudCache.etaOn !== etaOn) { hudCache.etaOn = etaOn; $('boss-eta').classList.toggle('hidden', !etaOn); }
+  if (etaOn) setHud('boss-eta', 't', `👑 ${fmtTime(BOSS_TIME - G.time)}`);
   updateStrip();
 }
 function updateHudCounts() {
   $('freed').textContent = `⛓ ${freedSet.size}/24`;
 }
 
-let bannerTimer = null;
+// Banners queue instead of overwriting each other, so a tier-up right after
+// a cage break still gets read. Spam beyond 4 drops the oldest.
+let bannerQ = [], bannerNext = 0, bannerHide = null, bannerPump = null;
 function banner(txt) {
-  const b = $('banner');
-  b.textContent = txt;
-  b.classList.remove('hidden');
-  b.style.animation = 'none';
-  void b.offsetWidth;
-  b.style.animation = '';
-  clearTimeout(bannerTimer);
-  bannerTimer = setTimeout(() => b.classList.add('hidden'), 2600);
+  if (bannerQ.length > 3) bannerQ.shift();
+  bannerQ.push(txt);
+  pumpBanner();
+}
+function pumpBanner() {
+  if (bannerPump) return;
+  bannerPump = setTimeout(() => {
+    bannerPump = null;
+    const txt = bannerQ.shift();
+    if (txt === undefined) return;
+    const b = $('banner');
+    b.textContent = txt;
+    b.classList.remove('hidden');
+    b.style.animation = 'none';
+    void b.offsetWidth;
+    b.style.animation = '';
+    bannerNext = performance.now() + 1500;
+    clearTimeout(bannerHide);
+    bannerHide = setTimeout(() => b.classList.add('hidden'), 2600);
+    if (bannerQ.length) pumpBanner();
+  }, Math.max(0, bannerNext - performance.now()));
 }
 
 // ---------------- Facecard strip & possession ----------------
@@ -1463,6 +1483,7 @@ function rebuildStrip() {
     strip.appendChild(card);
     stripCards.set(idx, { card, bar: bar.firstChild });
   }
+  strip.classList.toggle('scrollable', strip.scrollWidth > strip.clientWidth + 4);
   updateStrip();
 }
 
@@ -1471,7 +1492,11 @@ function updateStrip() {
     const hs = heroState[idx] || { tier: 0, charge: 0 };
     const active = player && idx === player.heroIdx;
     const cls = `facecard tier${hs.tier}` + (hs.charge >= 1 ? ' ready' : '') + (active ? ' active' : '');
-    if (els.cls !== cls) { els.cls = cls; els.card.className = cls; }
+    if (els.cls !== cls) {
+      els.cls = cls; els.card.className = cls;
+      // keep the card you're controlling in view of the scrollable strip
+      if (active) try { els.card.scrollIntoView({ inline: 'nearest', block: 'nearest' }); } catch (e) {}
+    }
     const barW = Math.round(Math.min(100, hs.charge * 100)) + '%';
     if (els.barW !== barW) { els.barW = barW; els.bar.style.width = barW; }
     if (active) {
@@ -1694,7 +1719,18 @@ function newGame(heroIdx, diffIdx) {
   const region = ['region-land', 'region-sea', 'region-sky'][(Math.random() * 3) | 0];
   Sound.playMusic(`music/${region}.mp3`);
   Sound.playFile(`assets/audio/heroes/${HEROES[heroIdx].id}_entrance.wav`, 0.9);
+  bannerQ.length = 0;
   banner(`${HEROES[heroIdx].name.toUpperCase()} — BREAK THE CAGES!`);
+  // one-time control hints for brand-new players
+  try {
+    const save = loadSave();
+    if (!save.seenHints) {
+      save.seenHints = 1;
+      localStorage.setItem('balitopia', JSON.stringify(save));
+      banner('LEFT THUMB MOVES · RIGHT THUMB AIMS');
+      banner('⛓ FOLLOW THE GOLD ARROW TO A CAGE');
+    }
+  } catch (e) {}
 }
 
 // ---------------- Run stats, score & records ----------------
