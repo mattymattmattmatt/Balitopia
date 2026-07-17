@@ -221,12 +221,14 @@ function spawnEnemy(type, tier, x, y) {
   const scale = type === 'minyar' ? 0.72 + Math.random() * 0.85 : 0.85 + Math.random() * 0.5;
   const timeMult = 1 + (G.time / 60) * 0.16;
   const tm = TIERS[tier].mult;
+  const diff = G.diff || DIFFICULTIES[0];
   e.alive = true; e.type = type; e.tier = tier; e.scale = scale;
   e.x = x; e.y = y;
-  e.maxhp = def.hp * tm * Math.pow(scale, 1.7) * timeMult;
+  e.maxhp = def.hp * tm * Math.pow(scale, 1.7) * timeMult * diff.ehp;
   e.hp = e.maxhp;
   e.spd = def.spd * (1.12 - scale * 0.18) * (0.9 + Math.random() * 0.25);
-  e.dmg = def.dmg * (1 + tier * 0.3) * scale;
+  e.dmg = def.dmg * (1 + tier * 0.3) * scale * diff.edmg;
+  e.lastSrc = undefined;
   e.xp = Math.max(1, Math.round(def.xp * (1 + tier * 0.9) * scale));
   e.r = def.r * scale;
   e.slowT = 0; e.poisonT = 0; e.poisonDps = 0; e.poisonTick = 0;
@@ -237,7 +239,7 @@ function spawnEnemy(type, tier, x, y) {
 
 function spawnWave(dt) {
   const t = G.time;
-  const rate = Math.min(13, 1.4 + t * 0.024);
+  const rate = Math.min(15, 1.4 + t * 0.024) * ((G.diff || DIFFICULTIES[0]).menace);
   G.spawnAcc += rate * dt;
   const maxTier = Math.min(TIERS.length - 1, (t / 85) | 0);
   while (G.spawnAcc >= 1) {
@@ -297,6 +299,7 @@ function dropGem(x, y, val) {
 function killEnemy(e) {
   e.alive = false;
   G.kills++;
+  if (e.lastSrc != null && heroState[e.lastSrc]) heroState[e.lastSrc].kills++;
   dropGem(e.x, e.y, e.xp);
   const tint = `hsl(${TIERS[e.tier].hue},65%,55%)`;
   spawnParts(e.x, e.y, tint, e.type === 'minyar' ? 6 : 12, 140);
@@ -317,6 +320,7 @@ function damageEnemy(e, dmg, o) {
   if (!e.alive) return;
   e.hp -= dmg;
   e.flash = 0.09;
+  if (o.src != null) e.lastSrc = o.src;
   addDamage(o.src, dmg);
   if (o.slow) e.slowT = Math.max(e.slowT, o.slow);
   if (o.poison) { e.poisonT = o.poisonT; e.poisonDps = Math.max(e.poisonDps, o.poison); }
@@ -757,11 +761,13 @@ function updateEnemies(dt) {
 // ---------------- Boss ----------------
 function spawnBoss() {
   const a = Math.random() * 6.283;
+  const diff = G.diff || DIFFICULTIES[0];
+  const hp = BOSS.hp * diff.bhp;
   G.boss = {
     alive: true, isBoss: true,
     x: Math.min(WORLD - 200, Math.max(200, player.x + Math.cos(a) * 640)),
     y: Math.min(WORLD - 200, Math.max(200, player.y + Math.sin(a) * 640)),
-    hp: BOSS.hp, maxhp: BOSS.hp, r: BOSS.r, spd: BOSS.spd, dmg: BOSS.dmg,
+    hp, maxhp: hp, r: BOSS.r, spd: BOSS.spd, dmg: BOSS.dmg * diff.edmg,
     slowT: 0, flash: 0, wob: 0, enraged: false,
     volleyCd: 4, summonCd: 8, slamCd: 12,
   };
@@ -971,6 +977,7 @@ function update(dt) {
   if (Math.abs(mx) > 0.1) player.fx = mx >= 0 ? 1 : -1;
   player.iv -= dt;
   if (m.regen > 0) player.hp = Math.min(maxHP(), player.hp + m.regen * dt);
+  if (heroState[player.heroIdx]) heroState[player.heroIdx].control += dt;   // time as active Guardian
 
   buildHash();
   spawnWave(dt);
@@ -1576,13 +1583,15 @@ function closeRoster() {
 }
 
 // ---------------- Game flow ----------------
-function newGame(heroIdx) {
+function newGame(heroIdx, diffIdx) {
   G.running = true; G.over = false; G.victory = false; G.pendingLv = 0;
   G.time = 0; G.kills = 0; G.level = 1; G.xp = 0; G.xpNext = 10;
   G.spawnAcc = 0; G.boss = null; G.bossWarned = false; G.shake = 0;
   G.sawDemonder = false; G.sawClubbo = false;
   G.flash = 0; G.powerHintShown = false;
-  heroState = HEROES.map(() => ({ dmg: 0, tier: 0, charge: 0 }));
+  G.diff = DIFFICULTIES[Math.max(0, Math.min(DIFFICULTIES.length - 1, diffIdx | 0))];
+  G.startHero = heroIdx;
+  heroState = HEROES.map(() => ({ dmg: 0, tier: 0, charge: 0, kills: 0, control: 0 }));
   powerWaves = [];
   G.mods = { dmg: 1, rate: 1, spd: 1, hpBonus: 0, ally: 1, magnet: 1, regen: 0, area: 1 };
 
@@ -1646,6 +1655,96 @@ function newGame(heroIdx) {
   banner(`${HEROES[heroIdx].name.toUpperCase()} — BREAK THE CAGES!`);
 }
 
+// ---------------- Run stats, score & records ----------------
+const fmtNum = n => n >= 1e6 ? (n / 1e6).toFixed(1).replace(/\.0$/, '') + 'M'
+  : n >= 1e4 ? Math.round(n / 1e3) + 'k'
+    : n >= 1e3 ? (n / 1e3).toFixed(1).replace(/\.0$/, '') + 'k'
+      : String(Math.round(n));
+const fmtTime = s => `${(s / 60) | 0}:${String((s | 0) % 60).padStart(2, '0')}`;
+
+function bossPct() {
+  if (G.victory) return 1;
+  if (G.boss) return Math.max(0, Math.min(1, 1 - G.boss.hp / G.boss.maxhp));
+  return 0;
+}
+function computeScore() {
+  const diff = G.diff || DIFFICULTIES[0];
+  const base = G.kills * 10 + Math.floor(G.time) * 4 + freedSet.size * 300
+    + G.level * 50 + Math.round(bossPct() * 3000) + (G.victory ? 8000 : 0);
+  return Math.round(base * diff.score);
+}
+
+// persist the run into the leaderboard + codex; returns its all-time rank (-1 if off-board)
+function saveRun(score) {
+  let rank = -1;
+  try {
+    const save = loadSave();
+    const rec = {
+      score, won: G.victory, heroId: HEROES[G.startHero].id, heroName: HEROES[G.startHero].name,
+      diff: G.diff.id, kills: G.kills, time: G.time | 0, freed: freedSet.size, level: G.level, date: Date.now(),
+    };
+    const records = Array.isArray(save.records) ? save.records : [];
+    records.push(rec);
+    records.sort((a, b) => b.score - a.score);
+    save.records = records.slice(0, 12);
+    rank = save.records.indexOf(rec);
+    const mastery = save.mastery || {};
+    heroState.forEach((hs, i) => {
+      if (freedSet.has(i)) mastery[HEROES[i].id] = Math.max(mastery[HEROES[i].id] || 0, hs.tier);
+    });
+    save.mastery = mastery;
+    if (G.victory) save.maxDiff = Math.max(save.maxDiff == null ? -1 : save.maxDiff, G.diff.id);
+    save.bestScore = Math.max(save.bestScore || 0, score);
+    save.bestKills = Math.max(save.bestKills || 0, G.kills);
+    save.wins = (save.wins || 0) + (G.victory ? 1 : 0);
+    save.lastHero = G.startHero; save.lastDiff = G.diff.id;
+    localStorage.setItem('balitopia', JSON.stringify(save));
+  } catch (e) {}
+  return rank;
+}
+
+function buildStatsScreen(rank) {
+  const won = G.victory, diff = G.diff;
+  $('over-title').textContent = won ? 'BALITOPIA IS FREE!' : 'THE TIDE TAKES YOU';
+  $('over-title').style.color = won ? '#ffd54f' : '#ef9a9a';
+  $('over-diff').innerHTML = `<span class="diff-badge" style="color:${diff.color};border-color:${diff.color}">◆ ${diff.name}</span>`;
+  $('over-flavor').textContent = won ? 'King Glob is unmade — the Balance holds.' : 'The horde was too many. This time.';
+  $('over-score').innerHTML =
+    `<div class="score-num">${G.score.toLocaleString()}</div>
+     <div class="score-lbl">SCORE${rank >= 0 ? ` · #${rank + 1} ALL-TIME` : ''}${rank === 0 ? ' <span class="newbest">NEW BEST!</span>' : ''}</div>`;
+  const t = G.time | 0;
+  $('over-summary').innerHTML = [
+    ['⏱', fmtTime(t), 'survived'],
+    ['☠', G.kills, 'slain'],
+    ['⛓', `${freedSet.size}/24`, 'freed'],
+    ['★', G.level, 'level'],
+    ['👑', won ? 'SLAIN' : `${Math.round(bossPct() * 100)}%`, 'King Glob'],
+  ].map(([ic, v, l]) => `<div class="sum-tile"><span class="sum-ic">${ic}</span><b>${v}</b><span>${l}</span></div>`).join('');
+
+  const rows = heroState.map((hs, i) => ({ i, hs })).filter(x => x.hs.dmg > 0 || freedSet.has(x.i))
+    .sort((a, b) => b.hs.dmg - a.hs.dmg);
+  const maxDmg = Math.max(1, ...rows.map(r => r.hs.dmg));
+  const totalDmg = rows.reduce((s, r) => s + r.hs.dmg, 0) || 1;
+  const wrap = $('over-heroes');
+  wrap.innerHTML = '';
+  rows.forEach(({ i, hs }) => {
+    const row = document.createElement('div');
+    row.className = 'hero-row';
+    const pct = Math.round(hs.dmg / totalDmg * 100);
+    row.innerHTML =
+      `<div class="hr-port" style="border-color:${TIER_COLORS[hs.tier]}"></div>
+       <div class="hr-mid">
+         <div class="hr-name">${HEROES[i].name}${i === G.startHero ? ' <span class="hr-lead">★</span>' : ''}
+           <span class="hr-tier" style="color:${TIER_COLORS[hs.tier]}">${TIER_NAMES[hs.tier]}</span></div>
+         <div class="hr-bar"><i style="width:${Math.max(3, hs.dmg / maxDmg * 100)}%;background:${TIER_COLORS[hs.tier]}"></i></div>
+       </div>
+       <div class="hr-stats"><b>${fmtNum(hs.dmg)}</b><span>${pct}% · ${hs.kills}☠ · ${fmtTime(hs.control)}</span></div>`;
+    row.querySelector('.hr-port').appendChild(Sprites.portrait(i, 64));
+    wrap.appendChild(row);
+  });
+  $('over-heroes').scrollTop = 0;
+}
+
 function endGame(won) {
   if (G.over) return;
   G.over = true; G.victory = won;
@@ -1655,31 +1754,59 @@ function endGame(won) {
     Sound.playFile('assets/audio/sfx/captured.mp3', 0.9);
     setTimeout(() => { if (G.over && !G.victory) Sound.playMusic('music/bgm_gameover.mp3', { loop: false, vol: 0.6 }); }, 1800);
   }
-
-  // persist bests
-  try {
-    const best = loadSave();
-    best.bestKills = Math.max(best.bestKills || 0, G.kills);
-    best.bestTime = Math.max(best.bestTime || 0, G.time | 0);
-    best.wins = (best.wins || 0) + (won ? 1 : 0);
-    localStorage.setItem('balitopia', JSON.stringify(best));
-  } catch (e) {}
-
+  G.score = computeScore();
+  const rank = saveRun(G.score);
   setTimeout(() => {
     G.running = false;
-    $('over-title').textContent = won ? 'BALITOPIA IS FREE!' : 'THE TIDE TAKES YOU';
-    $('over-title').style.color = won ? '#ffd54f' : '#ef9a9a';
-    $('over-story').textContent = won ? STORY.victory : STORY.defeat;
-    const t = G.time | 0;
-    $('over-stats').innerHTML =
-      `<div><b>${(t / 60) | 0}:${String(t % 60).padStart(2, '0')}</b>survived</div>` +
-      `<div><b>${G.kills}</b>enemies slain</div>` +
-      `<div><b>${freedSet.size}/24</b>guardians freed</div>` +
-      `<div><b>${G.level}</b>level</div>`;
+    buildStatsScreen(rank);
     $('hud').classList.add('hidden');
     $('screen-over').classList.remove('hidden');
   }, won ? 1600 : 900);
 }
+
+// ---------------- Records screen (leaderboard + codex) ----------------
+function buildRecordsScreen() {
+  const save = loadSave();
+  const records = Array.isArray(save.records) ? save.records : [];
+  const mastery = save.mastery || {};
+  const medal = ['🥇', '🥈', '🥉'];
+  let html = '<div class="rec-block"><div class="rec-h">BEST RUNS</div>';
+  if (!records.length) html += '<div class="rec-empty">No runs yet — go make history.</div>';
+  else {
+    html += '<div class="rec-list">';
+    records.forEach((r, i) => {
+      const d = DIFFICULTIES[r.diff] || DIFFICULTIES[0];
+      html += `<div class="rec-row${r.won ? ' won' : ''}">
+        <span class="rec-rank">${medal[i] || ('#' + (i + 1))}</span>
+        <span class="rec-score">${r.score.toLocaleString()}</span>
+        <span class="rec-hero">${r.won ? '👑 ' : ''}${r.heroName}</span>
+        <span class="rec-diff" style="color:${d.color}">${d.name}</span>
+        <span class="rec-meta">${fmtTime(r.time)} · ${r.kills}☠ · ${r.freed}/24</span>
+      </div>`;
+    });
+    html += '</div>';
+  }
+  html += '</div>';
+  const done = HEROES.filter(h => (mastery[h.id] || 0) >= 4).length;
+  html += `<div class="rec-block"><div class="rec-h">GUARDIAN CODEX <span class="rec-sub">${done}/24 mastered</span></div><div id="codex-grid"></div></div>`;
+  $('records-body').innerHTML = html;
+  const grid = $('codex-grid');
+  HEROES.forEach((h, i) => {
+    const tier = mastery[h.id];
+    const cell = document.createElement('div');
+    cell.className = 'codex-cell' + (tier == null ? ' locked' : '');
+    if (tier != null) cell.style.borderColor = TIER_COLORS[tier];
+    cell.appendChild(Sprites.portrait(i, 64));
+    const lbl = document.createElement('span');
+    lbl.textContent = tier != null ? TIER_NAMES[tier] : 'unseen';
+    if (tier != null) lbl.style.color = TIER_COLORS[tier];
+    cell.appendChild(lbl);
+    grid.appendChild(cell);
+  });
+  $('records-body').scrollTop = 0;
+}
+function openRecords() { Sound.sfx.uiClick(); buildRecordsScreen(); $('screen-records').classList.remove('hidden'); }
+function closeRecords() { Sound.sfx.uiBack(); $('screen-records').classList.add('hidden'); }
 
 // ---------------- Menus ----------------
 let selectedHero = 0;
@@ -1701,9 +1828,33 @@ function showScreen(id, music) {
   if (music === 'title') Sound.playMusic('music/title.mp3');
   else if (music === 'none') { Sound.stopMusic(); Sound.stopPreview(); }
 }
-function goTitle()  { Sound.stopPreview(); showScreen('screen-title', 'title'); }
+function goTitle()  { Sound.stopPreview(); $('screen-over').classList.add('hidden'); $('screen-records').classList.add('hidden'); showScreen('screen-title', 'title'); }
 function goStory()  { Sound.stopPreview(); showScreen('screen-story', 'title'); }
 function goSelect() { buildSelect(); showScreen('screen-select', 'none'); }  // quiet for hero previews
+
+let selectedDiff = 0;
+function buildDiffSelector() {
+  const save = loadSave();
+  const unlocked = Math.min(DIFFICULTIES.length - 1, (save.maxDiff == null ? -1 : save.maxDiff) + 1);
+  if (save.lastDiff != null) selectedDiff = save.lastDiff;
+  selectedDiff = Math.min(selectedDiff, unlocked);
+  const el = $('diff-select');
+  el.innerHTML = '';
+  DIFFICULTIES.forEach(d => {
+    const locked = d.id > unlocked;
+    const chip = document.createElement('button');
+    chip.className = 'diff-chip' + (d.id === selectedDiff ? ' on' : '') + (locked ? ' locked' : '');
+    chip.style.setProperty('--dc', d.color);
+    chip.textContent = locked ? `🔒 ${d.name}` : d.name;
+    if (!locked) chip.addEventListener('pointerdown', e => {
+      e.stopPropagation();
+      selectedDiff = d.id;
+      Sound.sfx.uiSelect();
+      el.querySelectorAll('.diff-chip').forEach(c => c.classList.toggle('on', c.textContent === d.name));
+    });
+    el.appendChild(chip);
+  });
+}
 
 function buildTitle() {
   $('story-box').innerHTML = STORY.intro.map(p => `<p>${p}</p>`).join('');
@@ -1721,9 +1872,13 @@ function buildTitle() {
 
   $('btn-menu-start').addEventListener('click', () => { enterApp(); Sound.sfx.uiClick(); goStory(); });
   $('btn-menu-continue').addEventListener('click', () => { enterApp(); Sound.sfx.uiClick(); goSelect(); });
+  $('btn-menu-records').addEventListener('click', () => { enterApp(); openRecords(); });
   $('btn-story-continue').addEventListener('click', () => { Sound.sfx.uiClick(); goSelect(); });
   $('btn-story-back').addEventListener('click', () => { Sound.sfx.uiBack(); goTitle(); });
   $('btn-select-back').addEventListener('click', () => { Sound.sfx.uiBack(); goStory(); });
+  $('btn-records-back').addEventListener('click', closeRecords);
+  $('btn-over-records').addEventListener('click', openRecords);
+  $('btn-over-menu').addEventListener('click', () => { Sound.sfx.uiBack(); goTitle(); });
 }
 
 function buildSelect() {
@@ -1744,6 +1899,7 @@ function buildSelect() {
     });
     grid.appendChild(card);
   });
+  buildDiffSelector();
   showDetail(selectedHero);
 }
 function showDetail(i) {
@@ -1768,7 +1924,7 @@ function showDetail(i) {
 
 // ---------------- Wire up ----------------
 function wire() {
-  $('btn-start').addEventListener('click', () => { Sound.ensure(); Sound.sfx.uiClick(); newGame(selectedHero); });
+  $('btn-start').addEventListener('click', () => { Sound.ensure(); Sound.sfx.uiClick(); newGame(selectedHero, selectedDiff); });
   $('btn-retry').addEventListener('click', () => {
     Sound.sfx.uiClick();
     $('screen-over').classList.add('hidden');

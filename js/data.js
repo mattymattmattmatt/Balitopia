@@ -139,9 +139,19 @@ const ENEMIES = {
   clubbo:   { hp:640, spd:32, dmg:34, xp:30, r:30, dh:118 },
 };
 
-const BOSS = { hp:16000, spd:40, dmg:45, r:66, xp:0, dh:190 };
+const BOSS = { hp:30000, spd:40, dmg:45, r:66, xp:0, dh:190 };   // the Hungry King is no pushover
 const BOSS_TIME = 480;          // King Glob arrives at 8:00
 const CAGE_HP = 70;
+
+// ---------- Difficulty / Ascension ----------
+// Higher tiers scale enemy HP/damage and boss HP, and multiply your score.
+// Each is unlocked by clearing the one below it. `menace` = spawn-rate boost.
+const DIFFICULTIES = [
+  { id:0, name:'GUARDIAN',  sub:'find your footing',   ehp:1.00, edmg:1.00, bhp:1.00, menace:1.00, score:1.0, color:'#4caf50' },
+  { id:1, name:'WARDEN',    sub:'the horde wises up',  ehp:1.45, edmg:1.30, bhp:1.7,  menace:1.15, score:1.6, color:'#2196f3' },
+  { id:2, name:'NIGHTMARE', sub:'no mercy on the sand',ehp:2.10, edmg:1.65, bhp:2.6,  menace:1.30, score:2.4, color:'#f44336' },
+  { id:3, name:'CATACLYSM', sub:'the island screams',  ehp:3.10, edmg:2.05, bhp:4.0,  menace:1.5,  score:3.5, color:'#ff9800' },
+];
 
 // ---------- Guardian mastery & powershots ----------
 // Each Guardian levels up from damage THEY deal (shown as facecard border color)

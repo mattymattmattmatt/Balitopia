@@ -39,6 +39,13 @@ face-card border: 🟩 Basic → 🟦 Expert → 🟥 Master → 🟧 Saiyan →
 adds +10% to that Guardian's damage, and powershots charge from damage dealt too — so your
 busiest fighters become your biggest bombs.
 
+**Difficulty & score:** choose a difficulty on the select screen — **Guardian → Warden →
+Nightmare → Cataclysm** — each scales the horde, the boss, and your **score multiplier**; clear
+one to unlock the next. Every run ends on a detailed stats screen (score, all-time rank, and a
+per-Guardian breakdown), saves to a local **Hall of Records** leaderboard, and fills in the
+**Guardian Codex** (your best mastery tier for each of the 24, across all runs). See
+**[REPLAYABILITY.md](REPLAYABILITY.md)** for the full design and what's planned next.
+
 - **Minyar** — endless, easy to squish, but they come in every size and color. Color = danger:
   green < blue < purple < pink < magma < gold.
 - **Demonder** — rarer, tough, hits hard.

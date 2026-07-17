@@ -43,6 +43,7 @@
   <nav id="title-menu">
     <button class="menu-btn" id="btn-menu-start">START</button>
     <button class="menu-btn hidden" id="btn-menu-continue">CONTINUE</button>
+    <button class="menu-btn" id="btn-menu-records">RECORDS</button>
   </nav>
   <p class="hint" id="title-hint">sound on 🔊 · best in landscape</p>
 </div>
@@ -78,8 +79,18 @@
       <p id="hero-detail-power"></p>
       <p id="hero-detail-desc"></p>
     </div>
-    <button class="big-btn" id="btn-start">FIGHT!</button>
+    <div id="detail-right">
+      <div id="diff-select" aria-label="difficulty"></div>
+      <button class="big-btn" id="btn-start">FIGHT!</button>
+    </div>
   </div>
+</div>
+
+<!-- ===== Records (leaderboard + codex) ===== -->
+<div id="screen-records" class="screen hidden">
+  <button class="back-btn" id="btn-records-back">‹ BACK</button>
+  <h2 class="select-title">HALL OF RECORDS</h2>
+  <div id="records-body"></div>
 </div>
 
 <!-- ===== Roster (in-game possession grid) ===== -->
@@ -96,12 +107,24 @@
   <div id="upgrade-row"></div>
 </div>
 
-<!-- ===== Game Over / Victory ===== -->
+<!-- ===== Game Over / Victory — detailed run stats ===== -->
 <div id="screen-over" class="screen hidden">
-  <h1 id="over-title"></h1>
-  <div id="over-story"></div>
-  <div id="over-stats"></div>
-  <button class="big-btn" id="btn-retry">PLAY AGAIN</button>
+  <div id="over-panel">
+    <div id="over-head">
+      <h1 id="over-title"></h1>
+      <div id="over-diff"></div>
+    </div>
+    <div id="over-flavor"></div>
+    <div id="over-score"></div>
+    <div id="over-summary"></div>
+    <div class="over-sec-label">GUARDIAN PERFORMANCE</div>
+    <div id="over-heroes"></div>
+    <div id="over-btns">
+      <button class="big-btn" id="btn-retry">PLAY AGAIN</button>
+      <button class="menu-btn2" id="btn-over-records">RECORDS</button>
+      <button class="menu-btn2" id="btn-over-menu">MENU</button>
+    </div>
+  </div>
 </div>
 
 <!-- ===== Rotate overlay ===== -->
