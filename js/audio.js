@@ -97,21 +97,24 @@ const Sound = (() => {
     bigKill()    { blip(160, 0.3, 'sawtooth', 0.2, -110); noise(0.25, 0.22, 500); },
     hurt()       { fileOr('hurt', 0.8, () => blip(180, 0.2, 'sawtooth', 0.22, -90)); },
     gem()        { if (ok('gem', 60)) fileOr('gem', 0.5, () => blip(880 + Math.random() * 220, 0.08, 'sine', 0.12, 300)); },
-    heal()       { fileOr('heal', 0.75, () => blip(520, 0.18, 'sine', 0.15, 260)); },
+    // heal chain: generated heal.mp3 → the shipped catch.wav → synth chime
+    heal()       { fileOr('heal', 0.75, () => { playFile('assets/audio/sfx/catch.wav', 0.7); blip(520, 0.18, 'sine', 0.1, 260); }); },
     level()      { fileOr('levelup', 0.85, () => [440, 554, 659, 880].forEach((f, i) => setTimeout(() => blip(f, 0.16, 'triangle', 0.2), i * 90))); },
     tierup()     { fileOr('tierup', 0.9, () => [523, 659, 784, 1047].forEach((f, i) => setTimeout(() => blip(f, 0.18, 'triangle', 0.22), i * 70))); },
     powerReady() { fileOr('power_ready', 0.8, () => [784, 1047, 1319].forEach((f, i) => setTimeout(() => blip(f, 0.14, 'sine', 0.18), i * 60))); },
     powershot()  { fileOr('powershot', 1.0, () => { blip(140, 0.5, 'sawtooth', 0.3, 120); noise(0.4, 0.3, 900); }); },
     cageHit()    { if (ok('cageHit', 90)) { blip(240, 0.06, 'square', 0.1, -60); noise(0.04, 0.1, 2200); } },
-    cageBreak()  { noise(0.3, 0.3, 1200); [523, 659, 784, 1047].forEach((f, i) => setTimeout(() => blip(f, 0.22, 'triangle', 0.22), i * 100)); },
     possess()    { blip(200, 0.3, 'sine', 0.2, 700); blip(900, 0.25, 'sine', 0.12, -500); },
     nova()       { if (ok('nova', 120)) noise(0.18, 0.18, 700); },
-    bossRoar()   { blip(70, 1.1, 'sawtooth', 0.35, 30); noise(0.9, 0.3, 300); },
     bossHit()    { if (ok('bossHit', 130)) noise(0.07, 0.12, 700); },
-    victory()    { [523, 659, 784, 1047, 1319].forEach((f, i) => setTimeout(() => blip(f, 0.35, 'triangle', 0.25), i * 150)); },
-    defeat()     { [392, 330, 262, 196].forEach((f, i) => setTimeout(() => blip(f, 0.4, 'sine', 0.22), i * 220)); },
   };
   probeSfx();
+
+  // resume the WebAudio context after a phone lock / tab switch — otherwise
+  // synth SFX silently die for the rest of the run
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden && ctx && ctx.state === 'suspended') ctx.resume().catch(() => {});
+  });
 
   // ------- music: 2-bar island battle loop -------
   const PENT = [261.6, 311.1, 349.2, 392.0, 466.2, 523.3, 622.3, 698.5]; // C minor pentatonic-ish
@@ -213,13 +216,14 @@ const Sound = (() => {
     if (previewEl) { previewEl.pause(); previewEl = null; }
   }
 
-  function toggleMute() {
-    muted = !muted;
+  function setMuted(v) {
+    muted = !!v;
     if (master) master.gain.value = muted ? 0 : 0.85;
     if (musicEl) musicEl.muted = muted;
     if (previewEl) previewEl.muted = muted;
     return muted;
   }
+  function toggleMute() { return setMuted(!muted); }
 
-  return { ensure, sfx: S, startMusic, stopMusic, playMusic, playFile, preview, stopPreview, toggleMute, get muted() { return muted; } };
+  return { ensure, sfx: S, startMusic, stopMusic, playMusic, playFile, preview, stopPreview, toggleMute, setMuted, get muted() { return muted; } };
 })();

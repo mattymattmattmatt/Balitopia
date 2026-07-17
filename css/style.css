@@ -352,6 +352,8 @@ html, body {
 
 #hud-top-center { position:absolute; top:calc(4px + env(safe-area-inset-top)); left:50%; transform:translateX(-50%); text-align:center; }
 #timer { font-size:22px; font-weight:bold; color:#fff; text-shadow:0 2px 4px #000; letter-spacing:2px; }
+#boss-eta { font-size:10px; font-weight:bold; letter-spacing:2px; color:#ff8a80; text-shadow:0 1px 3px #000; animation:etaPulse 1.4s ease-in-out infinite alternate; }
+@keyframes etaPulse { from { opacity:.55; } to { opacity:1; } }
 #boss-hp-wrap { position:relative; width:min(46vw,340px); height:13px; margin:2px auto 0; background:rgba(0,0,0,.6); border:1px solid #ff5252; border-radius:7px; overflow:hidden; }
 #boss-hp-bar { height:100%; width:100%; background:linear-gradient(#ff8a80,#c62828); }
 #boss-hp-wrap span { position:absolute; inset:0; font-size:8px; font-weight:bold; letter-spacing:2px; line-height:12px; text-align:center; color:#fff; text-shadow:0 1px 2px #000; }
@@ -370,6 +372,10 @@ html, body {
   scrollbar-width:none;
 }
 #facecard-strip::-webkit-scrollbar { display:none; }
+#facecard-strip.scrollable {
+  -webkit-mask-image:linear-gradient(90deg, transparent, #000 16px, #000 calc(100% - 16px), transparent);
+          mask-image:linear-gradient(90deg, transparent, #000 16px, #000 calc(100% - 16px), transparent);
+}
 .facecard {
   width:46px; height:46px; min-width:46px; border-radius:9px; border:2.5px solid rgba(255,255,255,.4);
   background:#0d2229; overflow:hidden; position:relative; cursor:pointer;
@@ -427,3 +433,9 @@ html, body {
 }
 #rotate-overlay small { font-size:13px; opacity:.7; }
 @media (orientation:portrait) { #rotate-overlay { display:flex; } }
+
+/* respect users who prefer reduced motion: stop the pulsing/bouncing loops */
+@media (prefers-reduced-motion: reduce) {
+  .facecard.ready, .facecard .fc-zap, .newbest { animation:none; }
+  .facecard.ready { box-shadow:0 0 10px 3px var(--glow, #ffd54f); }
+}

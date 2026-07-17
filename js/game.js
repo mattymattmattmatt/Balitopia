@@ -32,9 +32,18 @@ resize();
 
 // ---------------- Input ----------------
 const keys = {};
+const inRun = () => player && !G.over && $('hud') && !$('hud').classList.contains('hidden');
 window.addEventListener('keydown', e => {
   keys[e.code] = true;
-  if (e.code === 'Space') { e.preventDefault(); powershot(); }
+  // only own the keys during a run — menus keep normal keyboard behaviour
+  if (e.code === 'Space' && G.running) { e.preventDefault(); powershot(); }
+  if ((e.code === 'Escape' || e.code === 'KeyP') && inRun()) {
+    e.preventDefault();
+    if ($('screen-levelup').classList.contains('hidden')) {
+      if ($('screen-roster').classList.contains('hidden')) openRoster();
+      else closeRoster();
+    }
+  }
 });
 window.addEventListener('keyup', e => { keys[e.code] = false; });
 
@@ -94,13 +103,12 @@ const buzz = ms => { try { navigator.vibrate && navigator.vibrate(ms); } catch (
 // ---------------- Game state ----------------
 const G = {
   running: false, over: false, time: 0, kills: 0,
-  cam: { x: 0, y: 0 }, shake: 0,
+  cam: { x: 0, y: 0 }, shake: 0, hurtFlash: 0,
   level: 1, xp: 0, xpNext: 10,
-  spawnAcc: 0, hueSeen: 0,
+  spawnAcc: 0,
   boss: null, bossWarned: false, victory: false,
   healPct(p) { player.hp = Math.min(maxHP(), player.hp + maxHP() * p); },
 };
-const mods = () => G.mods;
 
 let player = null;             // { heroIdx, x, y, hp, iv, fx, ws[] }
 let allies = [];               // fighters
@@ -150,15 +158,19 @@ function makeFighter(heroIdx, x, y) {
 function maxHP() { return HEROES[player.heroIdx].hp + G.mods.hpBonus; }
 
 // ---------------- Spatial hash ----------------
-let hash = new Map();
+// Cell arrays are pooled across frames (generation-stamped) so rebuilding the
+// hash 60x/sec allocates nothing — no GC hitches when the horde is thick.
+const hash = new Map();
+let hashGen = 0;
 function buildHash() {
-  hash.clear();
+  hashGen++;
   for (let i = 0; i < MAX_ENEMIES; i++) {
     const e = enemies[i];
     if (!e.alive) continue;
     const k = ((e.x / CELL) | 0) * 4096 + ((e.y / CELL) | 0);
     let a = hash.get(k);
-    if (!a) { a = []; hash.set(k, a); }
+    if (!a) { a = []; a.gen = 0; hash.set(k, a); }
+    if (a.gen !== hashGen) { a.length = 0; a.gen = hashGen; }
     a.push(e);
   }
 }
@@ -167,7 +179,8 @@ function eachEnemyNear(x, y, r, cb) {
   const y0 = ((y - r) / CELL) | 0, y1 = ((y + r) / CELL) | 0;
   for (let cx = x0; cx <= x1; cx++) for (let cy = y0; cy <= y1; cy++) {
     const a = hash.get(cx * 4096 + cy);
-    if (a) for (let i = 0; i < a.length; i++) { if (cb(a[i]) === false) return; }
+    if (a && a.gen === hashGen)
+      for (let i = 0; i < a.length; i++) { if (cb(a[i]) === false) return; }
   }
 }
 function nearestTarget(x, y, maxD, includeCages) {
@@ -379,6 +392,7 @@ function hurtPlayer(dmg) {
   player.hp -= dmg;
   player.iv = 0.6;
   G.shake = Math.max(G.shake, 4);
+  G.hurtFlash = 0.4;
   Sound.sfx.hurt();
   buzz(25);
   if (player.hp <= 0) { player.hp = 0; endGame(false); }
@@ -737,7 +751,7 @@ function updateEnemies(dt) {
 
     // separation (cheap: only same cell, first few)
     const a = hash.get(((e.x / CELL) | 0) * 4096 + ((e.y / CELL) | 0));
-    if (a) {
+    if (a && a.gen === hashGen) {
       let checked = 0;
       for (let j = 0; j < a.length && checked < 4; j++) {
         const o = a[j];
@@ -823,9 +837,11 @@ function updateBoss(dt) {
     }
   }
   b.slamCd -= dt;
-  if (b.slamCd <= 0 && d < 330) {
-    b.slamCd = 11;
-    telegraphs.push({ x: b.x, y: b.y, r: 190, t: 0, dur: 1.0, dmg: 38 });
+  if (b.slamCd <= 0 && d < 420) {
+    // ground-target the PLAYER's position — a readable, dodgeable AoE
+    b.slamCd = b.enraged ? 8 : 11;
+    telegraphs.push({ x: player.x, y: player.y, r: 165, t: 0, dur: 1.1, dmg: 38 * (G.diff ? G.diff.edmg : 1) });
+    Sound.sfx.nova();
   }
 }
 
@@ -895,9 +911,10 @@ function updatePickups(dt) {
     }
     if ((h.x - player.x) ** 2 + (h.y - player.y) ** 2 < 26 * 26) {
       hearts.splice(i, 1);
-      player.hp = Math.min(maxHP(), player.hp + 20);
-      Sound.playFile('assets/audio/sfx/catch.wav', 0.7);
-      addFloater(player.x, player.y - 40, '+20', '#69f0ae');
+      const healAmt = Math.max(20, Math.round(maxHP() * 0.2));   // scales with HP pool
+      player.hp = Math.min(maxHP(), player.hp + healAmt);
+      Sound.sfx.heal();
+      addFloater(player.x, player.y - 40, '+' + healAmt, '#69f0ae');
     }
   }
   for (let i = patches.length - 1; i >= 0; i--) {
@@ -940,9 +957,12 @@ function updatePickups(dt) {
     p.x += p.vx * dt; p.y += p.vy * dt;
     p.vx *= 0.92; p.vy *= 0.92;
   }
+  // cage hit-flash decay (render skips off-screen cages, so decay it here)
+  for (const c of cages) if (c.flash > 0) c.flash -= dt;
 }
 
 function gainXP(v) {
+  if (G.over) return;   // no level-up prompts once the run has ended
   G.xp += v;
   Sound.sfx.gem();
   while (G.xp >= G.xpNext) {
@@ -995,6 +1015,7 @@ function update(dt) {
   updateEbullets(dt);
   updatePickups(dt);
   G.flash = Math.max(0, G.flash - dt * 1.3);
+  G.hurtFlash = Math.max(0, G.hurtFlash - dt * 1.6);
 
   // boss timing
   if (!G.bossWarned && G.time >= BOSS_TIME - 15) {
@@ -1087,7 +1108,6 @@ function render(dt) {
     const bob = Math.sin(G.time * 2 + c.x) * 2;
     ctx.drawImage(spr, c.x - 38, c.y - 44 + bob);
     if (c.flash > 0) {
-      c.flash -= dt;
       ctx.globalAlpha = 0.5; ctx.fillStyle = '#fff';
       ctx.fillRect(c.x - 38, c.y - 44 + bob, 76, 88);
       ctx.globalAlpha = 1;
@@ -1288,32 +1308,36 @@ function render(dt) {
   }
   ctx.globalAlpha = 1;
 
-  // ---- cage arrows (screen space) ----
+  // ---- edge arrows (screen space): nearest cage (gold) + King Glob (red) ----
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  let nearest = null, nd = Infinity;
-  for (const c of cages) {
-    if (c.broken) continue;
-    const d = (c.x - player.x) ** 2 + (c.y - player.y) ** 2;
-    if (d < nd) { nd = d; nearest = c; }
-  }
-  if (nearest && G.running && !G.over) {
-    const dx = nearest.x - player.x, dy = nearest.y - player.y;
-    const d = Math.sqrt(nd);
-    if (d > 330) {
-      const a = Math.atan2(dy, dx);
-      const ex = cw / 2 + Math.cos(a) * (Math.min(cw, ch) * 0.36);
-      const ey = ch / 2 + Math.sin(a) * (Math.min(cw, ch) * 0.36);
-      ctx.save();
-      ctx.translate(ex, ey); ctx.rotate(a);
-      ctx.globalAlpha = 0.5 + Math.sin(G.time * 4) * 0.25;
-      ctx.fillStyle = '#ffd54f';
-      ctx.beginPath(); ctx.moveTo(14, 0); ctx.lineTo(-8, -9); ctx.lineTo(-4, 0); ctx.lineTo(-8, 9); ctx.closePath(); ctx.fill();
-      ctx.rotate(-a);
-      ctx.font = 'bold 10px "Trebuchet MS",sans-serif';
-      ctx.fillText(`${Math.round(d / 50) * 50 / 10}0m`, 0, 24);
-      ctx.restore();
-      ctx.globalAlpha = 1;
+  const edgeArrow = (tx, ty, minDist, color, ring, label) => {
+    const dx = tx - player.x, dy = ty - player.y;
+    const d = Math.hypot(dx, dy);
+    if (d <= minDist) return;
+    const a = Math.atan2(dy, dx);
+    const ex = cw / 2 + Math.cos(a) * (Math.min(cw, ch) * (ring || 0.36));
+    const ey = ch / 2 + Math.sin(a) * (Math.min(cw, ch) * (ring || 0.36));
+    ctx.save();
+    ctx.translate(ex, ey); ctx.rotate(a);
+    ctx.globalAlpha = 0.5 + Math.sin(G.time * 4) * 0.25;
+    ctx.fillStyle = color;
+    ctx.beginPath(); ctx.moveTo(14, 0); ctx.lineTo(-8, -9); ctx.lineTo(-4, 0); ctx.lineTo(-8, 9); ctx.closePath(); ctx.fill();
+    ctx.rotate(-a);
+    ctx.font = 'bold 10px "Trebuchet MS",sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText(label !== undefined ? label : `${Math.round(d / 50) * 50 / 10}0m`, 0, 24);
+    ctx.restore();
+    ctx.globalAlpha = 1;
+  };
+  if (G.running && !G.over) {
+    let nearest = null, nd = Infinity;
+    for (const c of cages) {
+      if (c.broken) continue;
+      const d = (c.x - player.x) ** 2 + (c.y - player.y) ** 2;
+      if (d < nd) { nd = d; nearest = c; }
     }
+    if (nearest) edgeArrow(nearest.x, nearest.y, 330, '#ffd54f');
+    if (G.boss && G.boss.alive) edgeArrow(G.boss.x, G.boss.y, 380, '#ff5252', 0.4, '👑');
   }
 
   // joystick visuals (left = move, right = aim)
@@ -1347,40 +1371,77 @@ function render(dt) {
     ctx.fillStyle = `rgba(255,255,255,${Math.min(0.55, G.flash)})`;
     ctx.fillRect(0, 0, cw, ch);
   }
+
+  // damage feedback: red edge vignette on hit, soft pulse while low on HP
+  let danger = G.hurtFlash;
+  if (player && G.running && !G.over && player.hp < maxHP() * 0.3)
+    danger = Math.max(danger, 0.16 + Math.sin(G.time * 5) * 0.08);
+  if (danger > 0) {
+    const vg = ctx.createRadialGradient(cw / 2, ch / 2, Math.min(cw, ch) * 0.36, cw / 2, ch / 2, Math.max(cw, ch) * 0.62);
+    vg.addColorStop(0, 'rgba(200,0,0,0)');
+    vg.addColorStop(1, `rgba(200,10,10,${Math.min(0.55, danger)})`);
+    ctx.fillStyle = vg;
+    ctx.fillRect(0, 0, cw, ch);
+  }
 }
 
 // ---------------- HUD ----------------
 const $ = id => document.getElementById(id);
 let hudTick = 0;
+const hudCache = {};   // skip DOM writes when the value hasn't changed
+function setHud(id, prop, val) {
+  if (hudCache[id] === val) return;
+  hudCache[id] = val;
+  if (prop === 'w') $(id).style.width = val; else $(id).textContent = val;
+}
 function updateHud(dt) {
   hudTick -= dt;
   if (hudTick > 0) return;
   hudTick = 0.12;
-  $('hp-bar').style.width = Math.max(0, player.hp / maxHP() * 100) + '%';
-  $('hp-text').textContent = `${Math.ceil(player.hp)} / ${maxHP()}`;
-  $('xp-bar').style.width = Math.min(100, G.xp / G.xpNext * 100) + '%';
-  $('lvl-text').textContent = 'LV ' + G.level;
+  setHud('hp-bar', 'w', Math.round(Math.max(0, player.hp / maxHP() * 100)) + '%');
+  setHud('hp-text', 't', `${Math.ceil(player.hp)} / ${maxHP()}`);
+  setHud('xp-bar', 'w', Math.round(Math.min(100, G.xp / G.xpNext * 100)) + '%');
+  setHud('lvl-text', 't', 'LV ' + G.level);
   const t = G.time | 0;
-  $('timer').textContent = `${(t / 60) | 0}:${String(t % 60).padStart(2, '0')}`;
-  $('kills').textContent = '☠ ' + G.kills;
+  setHud('timer', 't', `${(t / 60) | 0}:${String(t % 60).padStart(2, '0')}`);
+  setHud('kills', 't', '☠ ' + G.kills);
   if (G.boss && G.boss.alive)
-    $('boss-hp-bar').style.width = Math.max(0, G.boss.hp / G.boss.maxhp * 100) + '%';
+    setHud('boss-hp-bar', 'w', Math.max(0, G.boss.hp / G.boss.maxhp * 100).toFixed(1) + '%');
+  // King Glob countdown from 6:00 — lets players plan their cage route
+  const etaOn = !G.boss && G.time > BOSS_TIME - 120 && G.time < BOSS_TIME;
+  if (hudCache.etaOn !== etaOn) { hudCache.etaOn = etaOn; $('boss-eta').classList.toggle('hidden', !etaOn); }
+  if (etaOn) setHud('boss-eta', 't', `👑 ${fmtTime(BOSS_TIME - G.time)}`);
   updateStrip();
 }
 function updateHudCounts() {
   $('freed').textContent = `⛓ ${freedSet.size}/24`;
 }
 
-let bannerTimer = null;
+// Banners queue instead of overwriting each other, so a tier-up right after
+// a cage break still gets read. Spam beyond 4 drops the oldest.
+let bannerQ = [], bannerNext = 0, bannerHide = null, bannerPump = null;
 function banner(txt) {
-  const b = $('banner');
-  b.textContent = txt;
-  b.classList.remove('hidden');
-  b.style.animation = 'none';
-  void b.offsetWidth;
-  b.style.animation = '';
-  clearTimeout(bannerTimer);
-  bannerTimer = setTimeout(() => b.classList.add('hidden'), 2600);
+  if (bannerQ.length > 3) bannerQ.shift();
+  bannerQ.push(txt);
+  pumpBanner();
+}
+function pumpBanner() {
+  if (bannerPump) return;
+  bannerPump = setTimeout(() => {
+    bannerPump = null;
+    const txt = bannerQ.shift();
+    if (txt === undefined) return;
+    const b = $('banner');
+    b.textContent = txt;
+    b.classList.remove('hidden');
+    b.style.animation = 'none';
+    void b.offsetWidth;
+    b.style.animation = '';
+    bannerNext = performance.now() + 1500;
+    clearTimeout(bannerHide);
+    bannerHide = setTimeout(() => b.classList.add('hidden'), 2600);
+    if (bannerQ.length) pumpBanner();
+  }, Math.max(0, bannerNext - performance.now()));
 }
 
 // ---------------- Facecard strip & possession ----------------
@@ -1423,6 +1484,7 @@ function rebuildStrip() {
     strip.appendChild(card);
     stripCards.set(idx, { card, bar: bar.firstChild });
   }
+  strip.classList.toggle('scrollable', strip.scrollWidth > strip.clientWidth + 4);
   updateStrip();
 }
 
@@ -1430,9 +1492,14 @@ function updateStrip() {
   for (const [idx, els] of stripCards) {
     const hs = heroState[idx] || { tier: 0, charge: 0 };
     const active = player && idx === player.heroIdx;
-    els.card.className =
-      `facecard tier${hs.tier}` + (hs.charge >= 1 ? ' ready' : '') + (active ? ' active' : '');
-    els.bar.style.width = Math.min(100, hs.charge * 100) + '%';
+    const cls = `facecard tier${hs.tier}` + (hs.charge >= 1 ? ' ready' : '') + (active ? ' active' : '');
+    if (els.cls !== cls) {
+      els.cls = cls; els.card.className = cls;
+      // keep the card you're controlling in view of the scrollable strip
+      if (active) try { els.card.scrollIntoView({ inline: 'nearest', block: 'nearest' }); } catch (e) {}
+    }
+    const barW = Math.round(Math.min(100, hs.charge * 100)) + '%';
+    if (els.barW !== barW) { els.barW = barW; els.bar.style.width = barW; }
     if (active) {
       const v = getStripVideo();
       if (v.parentElement !== els.card || v.dataset.hero !== HEROES[idx].id) {
@@ -1579,7 +1646,8 @@ function openRoster() {
 }
 function closeRoster() {
   $('screen-roster').classList.add('hidden');
-  if (!G.over) G.running = true;
+  // don't resume the simulation while a level-up choice is still on screen
+  if (!G.over && $('screen-levelup').classList.contains('hidden')) G.running = true;
 }
 
 // ---------------- Game flow ----------------
@@ -1588,7 +1656,7 @@ function newGame(heroIdx, diffIdx) {
   G.time = 0; G.kills = 0; G.level = 1; G.xp = 0; G.xpNext = 10;
   G.spawnAcc = 0; G.boss = null; G.bossWarned = false; G.shake = 0;
   G.sawDemonder = false; G.sawClubbo = false;
-  G.flash = 0; G.powerHintShown = false;
+  G.flash = 0; G.hurtFlash = 0; G.powerHintShown = false;
   G.diff = DIFFICULTIES[Math.max(0, Math.min(DIFFICULTIES.length - 1, diffIdx | 0))];
   G.startHero = heroIdx;
   heroState = HEROES.map(() => ({ dmg: 0, tier: 0, charge: 0, kills: 0, control: 0 }));
@@ -1652,7 +1720,18 @@ function newGame(heroIdx, diffIdx) {
   const region = ['region-land', 'region-sea', 'region-sky'][(Math.random() * 3) | 0];
   Sound.playMusic(`music/${region}.mp3`);
   Sound.playFile(`assets/audio/heroes/${HEROES[heroIdx].id}_entrance.wav`, 0.9);
+  bannerQ.length = 0;
   banner(`${HEROES[heroIdx].name.toUpperCase()} — BREAK THE CAGES!`);
+  // one-time control hints for brand-new players
+  try {
+    const save = loadSave();
+    if (!save.seenHints) {
+      save.seenHints = 1;
+      localStorage.setItem('balitopia', JSON.stringify(save));
+      banner('LEFT THUMB MOVES · RIGHT THUMB AIMS');
+      banner('⛓ FOLLOW THE GOLD ARROW TO A CAGE');
+    }
+  } catch (e) {}
 }
 
 // ---------------- Run stats, score & records ----------------
@@ -1758,6 +1837,9 @@ function endGame(won) {
   const rank = saveRun(G.score);
   setTimeout(() => {
     G.running = false;
+    G.pendingLv = 0;
+    $('screen-levelup').classList.add('hidden');   // clear any overlay caught mid-transition
+    $('screen-roster').classList.add('hidden');
     buildStatsScreen(rank);
     $('hud').classList.add('hidden');
     $('screen-over').classList.remove('hidden');
@@ -1863,8 +1945,11 @@ function buildTitle() {
      <figure class="threat-card"><img src="assets/img/poster_demonder.jpg" alt="Demonder"><figcaption>DEMONDER</figcaption></figure>
      <figure class="threat-card"><img src="assets/img/poster_clubbo.jpg" alt="Clubbo"><figcaption>CLUBBO</figcaption></figure>`;
 
-  // CONTINUE appears once the island knows you (any previous run)
+  // restore persisted preferences
   const save = loadSave();
+  if (save.muted) { Sound.setMuted(true); $('btn-mute').classList.add('muted'); }
+
+  // CONTINUE appears once the island knows you (any previous run)
   if (save.lastHero !== undefined) {
     selectedHero = Math.max(0, Math.min(HEROES.length - 1, save.lastHero));
     $('btn-menu-continue').classList.remove('hidden');
@@ -1938,6 +2023,11 @@ function wire() {
   $('btn-mute').addEventListener('click', () => {
     const m = Sound.toggleMute();
     $('btn-mute').classList.toggle('muted', m);
+    try {
+      const save = loadSave();
+      save.muted = m;
+      localStorage.setItem('balitopia', JSON.stringify(save));
+    } catch (e) {}
   });
   document.addEventListener('visibilitychange', () => {
     if (document.hidden && G.running && !G.over) openRoster();
@@ -1960,6 +2050,7 @@ window.__balitopia = {
   cages: () => cages,
   freed: () => freedSet,
   heroState: () => heroState,
+  telegraphs: () => telegraphs,
   joys: { move: joyMove, aim: joyAim },
   possess, breakCage, newGame, spawnEnemy, spawnBoss, powershot, addDamage,
 };
