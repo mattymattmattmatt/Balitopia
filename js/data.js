@@ -143,6 +143,15 @@ const BOSS = { hp:16000, spd:40, dmg:45, r:66, xp:0, dh:190 };
 const BOSS_TIME = 480;          // King Glob arrives at 8:00
 const CAGE_HP = 70;
 
+// ---------- Guardian mastery & powershots ----------
+// Each Guardian levels up from damage THEY deal (shown as facecard border color)
+// and charges a powershot the same way (glowing card when ready).
+const TIER_NAMES  = ['BASIC', 'EXPERT', 'MASTER', 'SAIYAN', 'SUPER SAIYAN'];
+const TIER_COLORS = ['#4caf50', '#2196f3', '#f44336', '#ff9800', '#ffee58'];
+const TIER_DMG    = [0, 1200, 3500, 8000, 16000];   // damage-dealt thresholds
+const TIER_BONUS  = 0.10;                           // +10% damage per tier
+const POWER_NEED  = 550;                            // damage per powershot charge (scales with tier)
+
 // ---------- Upgrades ----------
 const UPGRADES = [
   { id:'power',  icon:'💥', name:'Guardian Power', desc:'+20% damage for you and every freed Guardian', apply:m=>m.dmg*=1.2 },
