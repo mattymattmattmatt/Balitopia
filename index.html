@@ -34,13 +34,24 @@
   <div id="banner" class="hidden"></div>
 </div>
 
-<!-- ===== Title / Story ===== -->
+<!-- ===== Title (VS key art + menu) ===== -->
 <div id="screen-title" class="screen">
-  <h1>BALITOPIA</h1>
-  <h2>Guardians of the Broken Cages</h2>
+  <div id="title-logo">
+    <h1>BALITOPIA</h1>
+    <h2>Guardians of the Broken Cages</h2>
+  </div>
+  <nav id="title-menu">
+    <button class="menu-btn" id="btn-menu-start">START</button>
+    <button class="menu-btn hidden" id="btn-menu-continue">CONTINUE</button>
+  </nav>
+  <p class="hint" id="title-hint">sound on 🔊 · best in landscape</p>
+</div>
+
+<!-- ===== Story ===== -->
+<div id="screen-story" class="screen hidden">
+  <h2 class="select-title">THE FALL OF BALITOPIA</h2>
   <div id="story-box"></div>
-  <button class="big-btn" id="btn-title-continue">BEGIN</button>
-  <p class="hint">best played in landscape · sound on 🔊</p>
+  <button class="big-btn" id="btn-story-continue">CHOOSE YOUR GUARDIAN</button>
 </div>
 
 <!-- ===== Hero Select ===== -->

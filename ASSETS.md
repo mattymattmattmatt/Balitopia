@@ -13,7 +13,8 @@ assets/
 │   ├── portraits/<id>.webp   88×88 face cards (hero select, possession strip, cages)
 │   ├── heroes/<id>.png       ~96px world sprites, autocropped
 │   ├── enemies/{minyar,demonder,clubbo,kingglob}.png
-│   ├── title_bg.jpg          King Glob poster (title backdrop)
+│   ├── title_vs.jpg          composited VS key art (title screen backdrop)
+│   ├── title_bg.jpg          King Glob poster (story-screen backdrop)
 │   └── poster_*.jpg          story-screen enemy posters
 ├── audio/
 │   ├── music/     title, victory, bgm_intro, bgm_gameover, region-{land,sea,sky}
@@ -52,6 +53,7 @@ yelp zappo`
 | Palm / rock / bush props | ~96×120 / 60×44 / 56×44 transparent PNGs | Still procedural |
 | XP gem + heart | 20×20 / 22×20 PNGs | Still procedural |
 | App icon | 512×512 | For home-screen installs |
+| Painted title key art | 1920×1080 JPG → `img/title_vs.jpg` | The current one is auto-composited from the character renders by `tools/compose_title.js` (heroes left / villains right, neon glows, energy rift). Drop in a hand-painted replacement any time — same filename, done. Keep the center third quiet: the menu sits there. |
 
 The `assets/video/<id>.mp4` idle animations now play on the hero-select detail panel and on
 the active Guardian's face card in the HUD (with the static portrait as automatic fallback
