@@ -49,13 +49,25 @@
 
 <!-- ===== Story ===== -->
 <div id="screen-story" class="screen hidden">
-  <h2 class="select-title">THE FALL OF BALITOPIA</h2>
-  <div id="story-box"></div>
-  <button class="big-btn" id="btn-story-continue">CHOOSE YOUR GUARDIAN</button>
+  <button class="back-btn" id="btn-story-back">‹ BACK</button>
+  <div id="story-panel">
+    <div class="story-head">
+      <span class="story-flourish">✦</span>
+      <h2 id="story-title">The Fall of Balitopia</h2>
+      <span class="story-flourish">✦</span>
+    </div>
+    <div id="story-box"></div>
+    <div id="story-threats">
+      <div class="threat-tag">KNOWN THREATS</div>
+      <div id="threat-row"></div>
+    </div>
+    <button class="big-btn" id="btn-story-continue">CHOOSE YOUR GUARDIAN ›</button>
+  </div>
 </div>
 
 <!-- ===== Hero Select ===== -->
 <div id="screen-select" class="screen hidden">
+  <button class="back-btn" id="btn-select-back">‹ BACK</button>
   <h2 class="select-title">CHOOSE YOUR GUARDIAN</h2>
   <p class="select-sub">The other 23 are caged across the island. Break them free — they fight beside you, and their bodies are yours to possess.</p>
   <div id="hero-grid"></div>

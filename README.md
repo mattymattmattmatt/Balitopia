@@ -76,7 +76,17 @@ custom art via `assets/manifest.json` just won't load over `file://`).
 
 The game runs on the real Balitopia art set: hand-made portraits and full-body renders for
 all 24 Guardians, painted enemy art with 6 runtime power-tier tints, per-hero theme songs and
-entrance stingers, region battle music, and a full King Glob voice set. See
-**[ASSETS.md](ASSETS.md)** for the asset layout, how each file is used, and the short list of
-art still wanted (Bo's full-body render tops it). Anything missing falls back to procedural
-code-drawn art, so the game always runs.
+entrance stingers, region battle music, a full King Glob voice set, and a composited VS-style
+title screen plus a cinematic story backdrop (both built by `tools/compose_*.js`). See
+**[ASSETS.md](ASSETS.md)** for the asset layout and the short list of art still wanted.
+Anything missing falls back to procedural code-drawn art, so the game always runs.
+
+**Sound effects:** the punchy one-shots (powershot, level/tier-up, pickups, UI clicks…) are
+wired to drop-in ElevenLabs samples with synth fallbacks — see **[SOUND_DESIGN.md](SOUND_DESIGN.md)**
+for the full list, generation prompts, and how to enable each one.
+
+### Getting around
+
+Title → **START** plays the story, then hero select; **CONTINUE** (after your first run) jumps
+straight to select with your last Guardian preselected. Every menu screen has a **‹ BACK**
+button, and the title music hushes on the select screen so you can preview each Guardian's theme.
