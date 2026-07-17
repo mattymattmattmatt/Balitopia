@@ -962,6 +962,7 @@ function updatePickups(dt) {
 }
 
 function gainXP(v) {
+  if (G.over) return;   // no level-up prompts once the run has ended
   G.xp += v;
   Sound.sfx.gem();
   while (G.xp >= G.xpNext) {
@@ -1836,6 +1837,9 @@ function endGame(won) {
   const rank = saveRun(G.score);
   setTimeout(() => {
     G.running = false;
+    G.pendingLv = 0;
+    $('screen-levelup').classList.add('hidden');   // clear any overlay caught mid-transition
+    $('screen-roster').classList.add('hidden');
     buildStatsScreen(rank);
     $('hud').classList.add('hidden');
     $('screen-over').classList.remove('hidden');
