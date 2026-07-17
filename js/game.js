@@ -118,12 +118,15 @@ function addDamage(src, amt) {
   while (hs.tier < 4 && hs.dmg >= TIER_DMG[hs.tier + 1]) {
     hs.tier++;
     banner(`${HEROES[src].name.toUpperCase()} → ${TIER_NAMES[hs.tier]}!`);
-    Sound.sfx.level();
+    Sound.sfx.tierup();
     buzz(30);
     const f = player.heroIdx === src ? player : allies.find(a => a.heroIdx === src);
     if (f) spawnParts(f.x, f.y - 20, TIER_COLORS[hs.tier], 18, 170);
   }
-  if (hs.charge < 1) hs.charge = Math.min(1, hs.charge + amt / (POWER_NEED * (1 + hs.tier * 0.5)));
+  if (hs.charge < 1) {
+    hs.charge = Math.min(1, hs.charge + amt / (POWER_NEED * (1 + hs.tier * 0.5)));
+    if (hs.charge >= 1 && src === player.heroIdx) { Sound.sfx.powerReady(); buzz(20); }  // your powershot is ready
+  }
 }
 const heroDmgMul = idx => 1 + (heroState[idx] ? heroState[idx].tier : 0) * TIER_BONUS;
 
@@ -1490,8 +1493,8 @@ function powershot() {
   G.flash = 0.4;
   G.shake = Math.max(G.shake, 12);
   player.iv = Math.max(player.iv, 1.2);
-  Sound.playFile(`assets/audio/heroes/${hero.id}_entrance.wav`, 1);
-  Sound.sfx.nova();
+  Sound.sfx.powershot();
+  Sound.playFile(`assets/audio/heroes/${hero.id}_entrance.wav`, 0.9);
   buzz(70);
   banner(`⚡ ${hero.name.toUpperCase()} POWERSHOT ⚡`);
   return true;
@@ -1532,6 +1535,7 @@ function showLevelUp() {
     card.className = 'upgrade-card';
     card.innerHTML = `<div class="uc-icon">${pick.icon}</div><h3>${pick.name}</h3><p>${pick.desc}</p>`;
     card.addEventListener('pointerdown', () => {
+      Sound.sfx.uiClick();
       pick.apply(G.mods, G);
       G.pendingLv--;
       $('screen-levelup').classList.add('hidden');
@@ -1682,8 +1686,7 @@ let selectedHero = 0;
 const loadSave = () => { try { return JSON.parse(localStorage.getItem('balitopia') || '{}'); } catch (e) { return {}; } };
 
 function enterApp() {
-  Sound.ensure();
-  Sound.playMusic('music/title.mp3');
+  Sound.ensure();   // the caller (goStory / goSelect) owns music from here
   try { screen.orientation && screen.orientation.lock && screen.orientation.lock('landscape').catch(() => {}); } catch (e) {}
   try {
     const fs = document.documentElement.requestFullscreen && document.documentElement.requestFullscreen();
@@ -1691,13 +1694,23 @@ function enterApp() {
   } catch (e) {}
 }
 
+// menu-screen navigation (keeps only one visible; manages menu music)
+const MENU_SCREENS = ['screen-title', 'screen-story', 'screen-select'];
+function showScreen(id, music) {
+  MENU_SCREENS.forEach(s => $(s).classList.toggle('hidden', s !== id));
+  if (music === 'title') Sound.playMusic('music/title.mp3');
+  else if (music === 'none') { Sound.stopMusic(); Sound.stopPreview(); }
+}
+function goTitle()  { Sound.stopPreview(); showScreen('screen-title', 'title'); }
+function goStory()  { Sound.stopPreview(); showScreen('screen-story', 'title'); }
+function goSelect() { buildSelect(); showScreen('screen-select', 'none'); }  // quiet for hero previews
+
 function buildTitle() {
-  $('story-box').innerHTML = STORY.intro.map(p => `<p>${p}</p>`).join('') +
-    `<div id="poster-row">
-       <figure><img src="assets/img/poster_minyar.jpg" alt="Minyar"><figcaption>MINYAR</figcaption></figure>
-       <figure><img src="assets/img/poster_demonder.jpg" alt="Demonder"><figcaption>DEMONDER</figcaption></figure>
-       <figure><img src="assets/img/poster_clubbo.jpg" alt="Clubbo"><figcaption>CLUBBO</figcaption></figure>
-     </div>`;
+  $('story-box').innerHTML = STORY.intro.map(p => `<p>${p}</p>`).join('');
+  $('threat-row').innerHTML =
+    `<figure class="threat-card"><img src="assets/img/poster_minyar.jpg" alt="Minyar"><figcaption>MINYAR</figcaption></figure>
+     <figure class="threat-card"><img src="assets/img/poster_demonder.jpg" alt="Demonder"><figcaption>DEMONDER</figcaption></figure>
+     <figure class="threat-card"><img src="assets/img/poster_clubbo.jpg" alt="Clubbo"><figcaption>CLUBBO</figcaption></figure>`;
 
   // CONTINUE appears once the island knows you (any previous run)
   const save = loadSave();
@@ -1706,22 +1719,11 @@ function buildTitle() {
     $('btn-menu-continue').classList.remove('hidden');
   }
 
-  $('btn-menu-start').addEventListener('click', () => {
-    enterApp();
-    $('screen-title').classList.add('hidden');
-    $('screen-story').classList.remove('hidden');
-  });
-  $('btn-menu-continue').addEventListener('click', () => {
-    enterApp();
-    $('screen-title').classList.add('hidden');
-    buildSelect();
-    $('screen-select').classList.remove('hidden');
-  });
-  $('btn-story-continue').addEventListener('click', () => {
-    $('screen-story').classList.add('hidden');
-    buildSelect();
-    $('screen-select').classList.remove('hidden');
-  });
+  $('btn-menu-start').addEventListener('click', () => { enterApp(); Sound.sfx.uiClick(); goStory(); });
+  $('btn-menu-continue').addEventListener('click', () => { enterApp(); Sound.sfx.uiClick(); goSelect(); });
+  $('btn-story-continue').addEventListener('click', () => { Sound.sfx.uiClick(); goSelect(); });
+  $('btn-story-back').addEventListener('click', () => { Sound.sfx.uiBack(); goTitle(); });
+  $('btn-select-back').addEventListener('click', () => { Sound.sfx.uiBack(); goStory(); });
 }
 
 function buildSelect() {
@@ -1737,6 +1739,7 @@ function buildSelect() {
       selectedHero = i;
       grid.querySelectorAll('.hero-card').forEach(c => c.classList.toggle('selected', +c.dataset.idx === i));
       showDetail(i);
+      Sound.sfx.uiSelect();
       Sound.preview(`assets/audio/heroes/${HEROES[i].id}.mp3`);   // hero theme snippet
     });
     grid.appendChild(card);
@@ -1765,12 +1768,11 @@ function showDetail(i) {
 
 // ---------------- Wire up ----------------
 function wire() {
-  $('btn-start').addEventListener('click', () => { Sound.ensure(); newGame(selectedHero); });
+  $('btn-start').addEventListener('click', () => { Sound.ensure(); Sound.sfx.uiClick(); newGame(selectedHero); });
   $('btn-retry').addEventListener('click', () => {
+    Sound.sfx.uiClick();
     $('screen-over').classList.add('hidden');
-    buildSelect();
-    $('screen-select').classList.remove('hidden');
-    Sound.playMusic('music/title.mp3');
+    goSelect();
   });
   $('btn-roster').addEventListener('click', () => {
     if ($('screen-roster').classList.contains('hidden')) openRoster();
