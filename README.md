@@ -27,11 +27,17 @@ when the ground begins to shake... make the Hunger go hungry.
 
 | Action | Control |
 |---|---|
-| Move | Touch & drag anywhere (virtual joystick) — or WASD/arrows on desktop |
-| Attack | Automatic — every Guardian's power auto-aims |
+| Move | **Left thumb** — touch & drag the left half of the screen (or WASD/arrows on desktop) |
+| Aim | **Right thumb** — touch & drag the right half to steer your fire; let go to auto-aim |
 | Free a Guardian | Shoot their bamboo cage until it breaks (gold arrow points to the nearest one) |
 | Possess a Guardian | Tap their face card at the bottom of the screen (or ☰ for the full roster) |
+| **Powershot** | When a card glows with a ⚡, possess that Guardian and tap their card again (Space on desktop) — a screen-clearing blast in their signature style |
 | Level up | Collect the gems enemies drop, pick 1 of 3 upgrades |
+
+**Guardian mastery:** every Guardian levels up from the damage *they* deal, shown by their
+face-card border: 🟩 Basic → 🟦 Expert → 🟥 Master → 🟧 Saiyan → 🟨 Super Saiyan. Each level
+adds +10% to that Guardian's damage, and powershots charge from damage dealt too — so your
+busiest fighters become your biggest bombs.
 
 - **Minyar** — endless, easy to squish, but they come in every size and color. Color = danger:
   green < blue < purple < pink < magma < gold.

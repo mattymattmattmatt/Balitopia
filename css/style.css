@@ -87,7 +87,12 @@ html, body {
   background:rgba(255,255,255,.07); border-radius:14px; padding:10px 16px;
   max-width:640px; border:1px solid rgba(255,213,79,.4);
 }
+#hero-detail-portrait { position:relative; width:84px; height:84px; }
 #hero-detail-portrait canvas { width:84px; border-radius:10px; }
+#hero-detail-portrait .detail-video {
+  position:absolute; inset:0; width:100%; height:100%; object-fit:cover;
+  border-radius:10px; pointer-events:none;
+}
 #hero-detail-text { flex:1; min-width:0; }
 #hero-detail-text h3 { color:#ffd54f; font-size:18px; }
 #hero-detail-text p { font-size:12px; line-height:1.4; color:#cde8df; }
@@ -144,12 +149,39 @@ html, body {
 }
 #facecard-strip::-webkit-scrollbar { display:none; }
 .facecard {
-  width:44px; height:44px; min-width:44px; border-radius:9px; border:2px solid rgba(255,255,255,.4);
+  width:46px; height:46px; min-width:46px; border-radius:9px; border:2.5px solid rgba(255,255,255,.4);
   background:#0d2229; overflow:hidden; position:relative; cursor:pointer;
+  transition:transform .12s, border-color .2s;
 }
 .facecard canvas { width:100%; height:100%; }
-.facecard.active { border-color:#ffd54f; box-shadow:0 0 10px #ffd54f; }
-.facecard .fc-cd { position:absolute; inset:0; background:rgba(0,0,0,.6); }
+/* Guardian mastery: border color = level (green→blue→red→orange→yellow) */
+.facecard.tier0 { border-color:#4caf50; }
+.facecard.tier1 { border-color:#2196f3; }
+.facecard.tier2 { border-color:#f44336; }
+.facecard.tier3 { border-color:#ff9800; }
+.facecard.tier4 { border-color:#ffee58; box-shadow:0 0 8px rgba(255,238,88,.7); }
+.facecard.active { transform:scale(1.22); outline:2px solid #fff; z-index:2; }
+/* powershot ready: pulsing glow + bolt badge */
+.facecard.ready { animation:readyPulse .8s ease-in-out infinite alternate; }
+@keyframes readyPulse {
+  from { box-shadow:0 0 4px 1px rgba(255,255,255,.5); }
+  to   { box-shadow:0 0 16px 5px var(--glow, #ffd54f); }
+}
+.facecard .fc-zap {
+  display:none; position:absolute; top:-2px; right:0; font-size:15px; z-index:3;
+  text-shadow:0 0 6px #fff, 0 1px 2px #000; animation:zapBounce .5s ease-in-out infinite alternate;
+  pointer-events:none;
+}
+.facecard.ready .fc-zap { display:block; }
+@keyframes zapBounce { from { transform:translateY(0); } to { transform:translateY(-3px); } }
+.facecard .fc-bar {
+  position:absolute; left:0; right:0; bottom:0; height:5px; background:rgba(0,0,0,.65); z-index:2;
+}
+.facecard .fc-bar i { display:block; height:100%; width:0; background:linear-gradient(90deg,#80cbc4,#ffd54f); transition:width .2s; }
+.facecard.ready .fc-bar i { background:linear-gradient(90deg,#fff,var(--glow,#ffd54f)); }
+.facecard .fc-video {
+  position:absolute; inset:0; width:100%; height:100%; object-fit:cover; pointer-events:none; z-index:1;
+}
 
 #banner {
   position:absolute; top:22%; left:50%; transform:translateX(-50%);

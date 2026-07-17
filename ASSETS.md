@@ -47,14 +47,14 @@ yelp zappo`
 
 | Item | Spec | Why |
 |---|---|---|
-| **`assets/art/hero_bo.png`** | ~1024px full-body Bo (rainbow blackbird), transparent PNG | The dump has Bo's portrait, theme, entrance & 3D model — but no full-body render. Bo currently uses a code-drawn stand-in on the battlefield. (Regenerate `img/heroes/bo.png` at 96px tall from it, or supply both.) |
 | Ground tile | 256×256 seamless tropical ground PNG | Still procedural |
 | Bamboo cage | 76×88 PNG, see-through between bars | Still procedural |
 | Palm / rock / bush props | ~96×120 / 60×44 / 56×44 transparent PNGs | Still procedural |
 | XP gem + heart | 20×20 / 22×20 PNGs | Still procedural |
 | App icon | 512×512 | For home-screen installs |
 
-Unused-but-organized: the 27 `assets/video/*.mp4` animations (headless tooling couldn't decode
-their codec here; they can become animated cage-break/possession flourishes later) and the 28
-`assets/3d/*.glb` models (a future 3D remake says hi). `bgm_intro.mp3`, `spell_break.wav`,
-`fire_crackle.mp3` and the minyar/demonder/clubbo theme mp3s are also still on the bench.
+The `assets/video/<id>.mp4` idle animations now play on the hero-select detail panel and on
+the active Guardian's face card in the HUD (with the static portrait as automatic fallback
+where the codec isn't supported). Still on the bench: the enemy animation videos, the 28
+`assets/3d/*.glb` models (a future 3D remake says hi), `bgm_intro.mp3`, `spell_break.wav`,
+`fire_crackle.mp3` and the minyar/demonder/clubbo theme mp3s.

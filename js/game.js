@@ -32,30 +32,40 @@ resize();
 
 // ---------------- Input ----------------
 const keys = {};
-window.addEventListener('keydown', e => { keys[e.code] = true; });
+window.addEventListener('keydown', e => {
+  keys[e.code] = true;
+  if (e.code === 'Space') { e.preventDefault(); powershot(); }
+});
 window.addEventListener('keyup', e => { keys[e.code] = false; });
 
-const joy = { id: null, bx: 0, by: 0, dx: 0, dy: 0, active: false };
+// Two-thumb controls: left half of the screen moves, right half aims.
+const joyMove = { id: null, bx: 0, by: 0, dx: 0, dy: 0, active: false };
+const joyAim  = { id: null, bx: 0, by: 0, dx: 0, dy: 0, active: false };
+
 canvas.addEventListener('pointerdown', e => {
-  if (joy.id !== null) return;
-  joy.id = e.pointerId; joy.bx = e.clientX; joy.by = e.clientY;
-  joy.dx = 0; joy.dy = 0; joy.active = true;
+  const stick = e.clientX < cw / 2 ? joyMove : joyAim;
+  if (stick.id !== null) return;
+  stick.id = e.pointerId; stick.bx = e.clientX; stick.by = e.clientY;
+  stick.dx = 0; stick.dy = 0; stick.active = true;
 });
 window.addEventListener('pointermove', e => {
-  if (e.pointerId !== joy.id) return;
-  let dx = e.clientX - joy.bx, dy = e.clientY - joy.by;
+  const stick = e.pointerId === joyMove.id ? joyMove : e.pointerId === joyAim.id ? joyAim : null;
+  if (!stick) return;
+  let dx = e.clientX - stick.bx, dy = e.clientY - stick.by;
   const len = Math.hypot(dx, dy), max = 58;
   if (len > max) {
     // drag the base along so direction changes feel instant
-    joy.bx = e.clientX - dx / len * max;
-    joy.by = e.clientY - dy / len * max;
+    stick.bx = e.clientX - dx / len * max;
+    stick.by = e.clientY - dy / len * max;
     dx = dx / len * max; dy = dy / len * max;
   }
-  joy.dx = dx / max; joy.dy = dy / max;
+  stick.dx = dx / max; stick.dy = dy / max;
 });
 const joyEnd = e => {
-  if (e.pointerId !== joy.id) return;
-  joy.id = null; joy.active = false; joy.dx = 0; joy.dy = 0;
+  for (const stick of [joyMove, joyAim]) {
+    if (e.pointerId !== stick.id) continue;
+    stick.id = null; stick.active = false; stick.dx = 0; stick.dy = 0;
+  }
 };
 window.addEventListener('pointerup', joyEnd);
 window.addEventListener('pointercancel', joyEnd);
@@ -66,11 +76,20 @@ function moveVector() {
   if (keys.KeyS || keys.ArrowDown) my += 1;
   if (keys.KeyA || keys.ArrowLeft) mx -= 1;
   if (keys.KeyD || keys.ArrowRight) mx += 1;
-  if (joy.active) { mx = joy.dx; my = joy.dy; }
+  if (joyMove.active) { mx = joyMove.dx; my = joyMove.dy; }
   const l = Math.hypot(mx, my);
   if (l > 1) { mx /= l; my /= l; }
   return [mx, my];
 }
+// manual aim from the right thumb (null = auto-aim); small deadzone
+function aimVector() {
+  if (!joyAim.active) return null;
+  const l = Math.hypot(joyAim.dx, joyAim.dy);
+  if (l < 0.22) return null;
+  return [joyAim.dx / l, joyAim.dy / l];
+}
+
+const buzz = ms => { try { navigator.vibrate && navigator.vibrate(ms); } catch (e) {} };
 
 // ---------------- Game state ----------------
 const G = {
@@ -88,6 +107,25 @@ let allies = [];               // fighters
 let cages = [];                // { heroIdx, x, y, hp, broken }
 let freedSet = new Set();      // heroIdx freed this run (incl. starter)
 let decor = [];
+let heroState = [];            // per-hero mastery: { dmg, tier, charge }
+let powerWaves = [];           // queued powershot projectile rings
+
+function addDamage(src, amt) {
+  if (src === undefined || src === null || G.over) return;
+  const hs = heroState[src];
+  if (!hs) return;
+  hs.dmg += amt;
+  while (hs.tier < 4 && hs.dmg >= TIER_DMG[hs.tier + 1]) {
+    hs.tier++;
+    banner(`${HEROES[src].name.toUpperCase()} → ${TIER_NAMES[hs.tier]}!`);
+    Sound.sfx.level();
+    buzz(30);
+    const f = player.heroIdx === src ? player : allies.find(a => a.heroIdx === src);
+    if (f) spawnParts(f.x, f.y - 20, TIER_COLORS[hs.tier], 18, 170);
+  }
+  if (hs.charge < 1) hs.charge = Math.min(1, hs.charge + amt / (POWER_NEED * (1 + hs.tier * 0.5)));
+}
+const heroDmgMul = idx => 1 + (heroState[idx] ? heroState[idx].tier : 0) * TIER_BONUS;
 
 const enemies = [];  for (let i = 0; i < MAX_ENEMIES; i++) enemies.push({ alive: false });
 const projs = [];    for (let i = 0; i < MAX_PROJ; i++) projs.push({ alive: false, hitList: [] });
@@ -155,6 +193,19 @@ function nearestCage(x, y, maxD) {
     const d = (c.x - x) ** 2 + (c.y - y) ** 2;
     if (d < bd) { bd = d; best = c; }
   }
+  return best;
+}
+function nearestInCone(x, y, maxD, ang, half) {
+  let best = null, bd = maxD * maxD;
+  const check = (ex, ey, e) => {
+    const d = (ex - x) ** 2 + (ey - y) ** 2;
+    if (d >= bd) return;
+    let da = Math.atan2(ey - y, ex - x) - ang;
+    da = Math.atan2(Math.sin(da), Math.cos(da));
+    if (Math.abs(da) < half) { bd = d; best = e; }
+  };
+  eachEnemyNear(x, y, maxD, e => check(e.x, e.y, e));
+  if (G.boss && G.boss.alive) check(G.boss.x, G.boss.y, G.boss);
   return best;
 }
 
@@ -263,6 +314,7 @@ function damageEnemy(e, dmg, o) {
   if (!e.alive) return;
   e.hp -= dmg;
   e.flash = 0.09;
+  addDamage(o.src, dmg);
   if (o.slow) e.slowT = Math.max(e.slowT, o.slow);
   if (o.poison) { e.poisonT = o.poisonT; e.poisonDps = Math.max(e.poisonDps, o.poison); }
   if (o.knock) {
@@ -277,6 +329,7 @@ function damageBoss(dmg, o) {
   const b = G.boss;
   if (!b || !b.alive) return;
   b.hp -= dmg; b.flash = 0.07;
+  addDamage(o.src, dmg);
   if (o.slow) b.slowT = Math.max(b.slowT, o.slow * 0.3);
   addFloater(b.x + (Math.random() - 0.5) * 60, b.y - 90, Math.round(dmg), '#ffd54f');
   Sound.sfx.bossHit();
@@ -320,6 +373,7 @@ function hurtPlayer(dmg) {
   player.iv = 0.6;
   G.shake = Math.max(G.shake, 4);
   Sound.sfx.hurt();
+  buzz(25);
   if (player.hp <= 0) { player.hp = 0; endGame(false); }
 }
 
@@ -334,7 +388,7 @@ function spawnProj(o) {
       color: o.color, rainbow: !!o.rainbow, homing: !!o.homing, boomerang: !!o.boomerang, returning: false,
       explode: o.explode || 0, split: !!o.split, slow: o.slow || 0,
       poison: o.poison || 0, poisonT: o.poisonT || 0, knock: o.knock || 0,
-      owner: o.owner || null, t: 0, hitCd: 0,
+      owner: o.owner || null, src: o.src, t: 0, hitCd: 0,
     });
     p.hitList.length = 0;
     return p;
@@ -344,8 +398,9 @@ function spawnProj(o) {
 
 function fireWeapon(f, w, ws, isAlly, dt) {
   const m = G.mods;
+  const src = f.heroIdx;
   const rateMul = m.rate * (isAlly ? 1.25 : 1);
-  const dmgMul = m.dmg * (isAlly ? 0.6 * m.ally : 1);
+  const dmgMul = m.dmg * (isAlly ? 0.6 * m.ally : 1) * heroDmgMul(src);
   const areaMul = m.area;
 
   if (w.type === 'orbit') {
@@ -360,13 +415,13 @@ function fireWeapon(f, w, ws, isAlly, dt) {
         const rr = w.size * areaMul + 14;
         eachEnemyNear(ox, oy, rr + 20, e => {
           if ((e.x - ox) ** 2 + (e.y - oy) ** 2 < (rr + e.r) ** 2) {
-            damageEnemy(e, w.dmg * dmgMul, { knock: 60, kx: e.x - f.x, ky: e.y - f.y });
+            damageEnemy(e, w.dmg * dmgMul, { knock: 60, kx: e.x - f.x, ky: e.y - f.y, src });
             hit = true; return false;
           }
         });
         if (!hit && G.boss && G.boss.alive) {
           const b = G.boss;
-          if ((b.x - ox) ** 2 + (b.y - oy) ** 2 < (rr + b.r) ** 2) { damageBoss(w.dmg * dmgMul, {}); hit = true; }
+          if ((b.x - ox) ** 2 + (b.y - oy) ** 2 < (rr + b.r) ** 2) { damageBoss(w.dmg * dmgMul, { src }); hit = true; }
         }
         if (!hit) for (const c of cages) {
           if (c.broken) continue;
@@ -388,10 +443,10 @@ function fireWeapon(f, w, ws, isAlly, dt) {
     const R = w.radius * areaMul;
     eachEnemyNear(f.x, f.y, R + 30, e => {
       if ((e.x - f.x) ** 2 + (e.y - f.y) ** 2 < (R + e.r) ** 2)
-        damageEnemy(e, w.dmg * dmgMul, {});
+        damageEnemy(e, w.dmg * dmgMul, { src });
     });
     if (G.boss && G.boss.alive && (G.boss.x - f.x) ** 2 + (G.boss.y - f.y) ** 2 < (R + G.boss.r) ** 2)
-      damageBoss(w.dmg * dmgMul, {});
+      damageBoss(w.dmg * dmgMul, { src });
     for (const c of cages) {
       if (!c.broken && (c.x - f.x) ** 2 + (c.y - f.y) ** 2 < (R + 30) ** 2) damageCage(c, w.dmg * dmgMul);
     }
@@ -401,7 +456,7 @@ function fireWeapon(f, w, ws, isAlly, dt) {
   if (w.type === 'trail') {
     ws.cd = interval;
     if (patches.length > 70) patches.shift();
-    patches.push({ x: f.x, y: f.y, r: w.radius * areaMul, dps: w.dmg * dmgMul, life: w.patchLife, tick: 0, color: w.color });
+    patches.push({ x: f.x, y: f.y, r: w.radius * areaMul, dps: w.dmg * dmgMul, life: w.patchLife, tick: 0, color: w.color, src });
     return;
   }
 
@@ -414,24 +469,34 @@ function fireWeapon(f, w, ws, isAlly, dt) {
       spawnProj({
         x: f.x, y: f.y, vx: Math.cos(a) * w.speed, vy: Math.sin(a) * w.speed,
         dmg: w.dmg * dmgMul, pierce: 1, size: w.size * areaMul, life: w.life,
-        color: w.color, knock: w.knock || 0,
+        color: w.color, knock: w.knock || 0, src,
       });
     }
     if (!isAlly) Sound.sfx.nova();
     return;
   }
 
-  // ----- aimed weapons need a target -----
+  // ----- aimed weapons need a target (or the player's right thumb) -----
   const range = w.type === 'beam' ? (w.length * areaMul) : (isAlly ? 540 : 640);
   let target = nearestTarget(f.x, f.y, range, true);
-  // rescue priority: a cage right next to you outranks the horde
-  const closeCage = nearestCage(f.x, f.y, isAlly ? 210 : 250);
-  if (closeCage) target = closeCage;
-  const [mx, my] = moveVector();
+  const av = isAlly ? null : aimVector();
   let ang;
-  if (target) ang = Math.atan2(target.y - f.y, target.x - f.x);
-  else if (!isAlly && (mx || my)) ang = Math.atan2(my, mx);
-  else return;
+  if (av) {
+    // manual aim overrides auto-aim entirely
+    ang = Math.atan2(av[1], av[0]);
+    if (w.type === 'chain') {
+      target = nearestInCone(f.x, f.y, range, ang, 0.75) || target || nearestCage(f.x, f.y, 250);
+      if (!target) return;
+    }
+  } else {
+    // rescue priority: a cage right next to you outranks the horde
+    const closeCage = nearestCage(f.x, f.y, isAlly ? 210 : 250);
+    if (closeCage) target = closeCage;
+    const [mx, my] = moveVector();
+    if (target) ang = Math.atan2(target.y - f.y, target.x - f.x);
+    else if (!isAlly && (mx || my)) ang = Math.atan2(my, mx);
+    else return;
+  }
 
   ws.cd = interval;
   if (ang !== undefined && Math.cos(ang) !== 0) f.fx = Math.cos(ang) >= 0 ? 1 : -1;
@@ -443,7 +508,7 @@ function fireWeapon(f, w, ws, isAlly, dt) {
     const visited = new Set();
     for (let j = 0; j <= w.jumps && cur; j++) {
       pts.push({ x: cur.x, y: cur.y });
-      damageEnemy(cur, w.dmg * dmgMul * Math.pow(0.85, j), {});
+      damageEnemy(cur, w.dmg * dmgMul * Math.pow(0.85, j), { src });
       if (cur.id !== undefined) visited.add(cur.id);
       let nxt = null, bd = (w.range * areaMul) ** 2;
       const cx = cur.x, cy = cur.y;
@@ -467,12 +532,12 @@ function fireWeapon(f, w, ws, isAlly, dt) {
       const along = px * dx + py * dy;
       if (along < -e.r || along > L + e.r) return;
       const perp = Math.abs(px * dy - py * dx);
-      if (perp < W2 + e.r) damageEnemy(e, w.dmg * dmgMul, {});
+      if (perp < W2 + e.r) damageEnemy(e, w.dmg * dmgMul, { src });
     });
     if (G.boss && G.boss.alive) {
       const b = G.boss, px = b.x - f.x, py = b.y - f.y;
       const along = px * dx + py * dy;
-      if (along > -b.r && along < L + b.r && Math.abs(px * dy - py * dx) < W2 + b.r) damageBoss(w.dmg * dmgMul, {});
+      if (along > -b.r && along < L + b.r && Math.abs(px * dy - py * dx) < W2 + b.r) damageBoss(w.dmg * dmgMul, { src });
     }
     for (const c of cages) {
       if (c.broken) continue;
@@ -493,14 +558,14 @@ function fireWeapon(f, w, ws, isAlly, dt) {
       let da = Math.atan2(e.y - f.y, e.x - f.x) - ang;
       da = Math.atan2(Math.sin(da), Math.cos(da));
       if (Math.abs(da) < half + 0.25)
-        damageEnemy(e, w.dmg * dmgMul, { knock: 90, kx: e.x - f.x, ky: e.y - f.y });
+        damageEnemy(e, w.dmg * dmgMul, { knock: 90, kx: e.x - f.x, ky: e.y - f.y, src });
     });
     if (G.boss && G.boss.alive) {
       const b = G.boss, d2 = (b.x - f.x) ** 2 + (b.y - f.y) ** 2;
       if (d2 < (R + b.r) ** 2) {
         let da = Math.atan2(b.y - f.y, b.x - f.x) - ang;
         da = Math.atan2(Math.sin(da), Math.cos(da));
-        if (Math.abs(da) < half + 0.3) damageBoss(w.dmg * dmgMul, {});
+        if (Math.abs(da) < half + 0.3) damageBoss(w.dmg * dmgMul, { src });
       }
     }
     for (const c of cages) {
@@ -528,17 +593,17 @@ function fireWeapon(f, w, ws, isAlly, dt) {
       dmg: w.dmg * dmgMul, pierce: w.pierce, size: w.size * areaMul, life: w.life,
       color: w.color, rainbow: w.rainbow, homing: w.homing, boomerang: w.boomerang, explode: w.explode ? w.explode * areaMul : 0,
       split: w.split, slow: w.slow, poison: w.poison ? w.poison * dmgMul / Math.max(1, w.dmg) * w.dmg : 0,
-      poisonT: w.poisonT, knock: w.knock, owner: f,
+      poisonT: w.poisonT, knock: w.knock, owner: f, src,
     });
   }
   if (!isAlly) Sound.sfx.shoot();
 }
 
-function explodeAt(x, y, r, dmg) {
+function explodeAt(x, y, r, dmg, src) {
   eachEnemyNear(x, y, r + 30, e => {
-    if ((e.x - x) ** 2 + (e.y - y) ** 2 < (r + e.r) ** 2) damageEnemy(e, dmg, {});
+    if ((e.x - x) ** 2 + (e.y - y) ** 2 < (r + e.r) ** 2) damageEnemy(e, dmg, { src });
   });
-  if (G.boss && G.boss.alive && (G.boss.x - x) ** 2 + (G.boss.y - y) ** 2 < (r + G.boss.r) ** 2) damageBoss(dmg, {});
+  if (G.boss && G.boss.alive && (G.boss.x - x) ** 2 + (G.boss.y - y) ** 2 < (r + G.boss.r) ** 2) damageBoss(dmg, { src });
   for (const c of cages) {
     if (!c.broken && (c.x - x) ** 2 + (c.y - y) ** 2 < (r + 30) ** 2) damageCage(c, dmg);
   }
@@ -576,7 +641,7 @@ function updateProjs(dt) {
         if (d < 24 || p.t > p.life * 2.4) { p.alive = false; continue; }
       }
     } else if (p.t > p.life) {
-      if (p.explode) explodeAt(p.x, p.y, p.explode, p.dmg * 0.8);
+      if (p.explode) explodeAt(p.x, p.y, p.explode, p.dmg * 0.8, p.src);
       p.alive = false; continue;
     }
 
@@ -589,14 +654,14 @@ function updateProjs(dt) {
       if (dead) return false;
       if (p.hitList.includes(e.id)) return;
       if ((e.x - p.x) ** 2 + (e.y - p.y) ** 2 > (pr + e.r) ** 2) return;
-      damageEnemy(e, p.dmg, { slow: p.slow, poison: p.poison, poisonT: p.poisonT, knock: p.knock, kx: p.vx, ky: p.vy });
+      damageEnemy(e, p.dmg, { slow: p.slow, poison: p.poison, poisonT: p.poisonT, knock: p.knock, kx: p.vx, ky: p.vy, src: p.src });
       p.hitList.push(e.id);
-      if (p.explode) { explodeAt(p.x, p.y, p.explode, p.dmg * 0.8); dead = true; return false; }
+      if (p.explode) { explodeAt(p.x, p.y, p.explode, p.dmg * 0.8, p.src); dead = true; return false; }
       if (p.split) {
         p.split = false;
         for (let s = 0; s < 3; s++) {
           const a = Math.random() * 6.283;
-          spawnProj({ x: p.x, y: p.y, vx: Math.cos(a) * 320, vy: Math.sin(a) * 320, dmg: p.dmg * 0.5, pierce: 0, size: p.size * 0.6, life: 0.5, color: p.color });
+          spawnProj({ x: p.x, y: p.y, vx: Math.cos(a) * 320, vy: Math.sin(a) * 320, dmg: p.dmg * 0.5, pierce: 0, size: p.size * 0.6, life: 0.5, color: p.color, src: p.src });
         }
       }
       if (p.pierce > 0) { p.pierce--; }
@@ -608,8 +673,8 @@ function updateProjs(dt) {
     if (G.boss && G.boss.alive && p.hitCd <= 0) {
       const b = G.boss;
       if ((b.x - p.x) ** 2 + (b.y - 70 - p.y) ** 2 < (pr + b.r) ** 2) {
-        damageBoss(p.dmg, { slow: p.slow });
-        if (p.explode) { explodeAt(p.x, p.y, p.explode, p.dmg * 0.8); p.alive = false; continue; }
+        damageBoss(p.dmg, { slow: p.slow, src: p.src });
+        if (p.explode) { explodeAt(p.x, p.y, p.explode, p.dmg * 0.8, p.src); p.alive = false; continue; }
         if (p.pierce > 0 || p.boomerang) { p.hitCd = 0.25; }
         else { p.alive = false; continue; }
       }
@@ -834,10 +899,10 @@ function updatePickups(dt) {
       pa.tick = 0.25;
       eachEnemyNear(pa.x, pa.y, pa.r + 30, e => {
         if ((e.x - pa.x) ** 2 + (e.y - pa.y) ** 2 < (pa.r + e.r) ** 2)
-          damageEnemy(e, pa.dps * 0.25, {});
+          damageEnemy(e, pa.dps * 0.25, { src: pa.src });
       });
       if (G.boss && G.boss.alive && (G.boss.x - pa.x) ** 2 + (G.boss.y - pa.y) ** 2 < (pa.r + G.boss.r) ** 2)
-        damageBoss(pa.dps * 0.25, {});
+        damageBoss(pa.dps * 0.25, { src: pa.src });
     }
   }
   for (let i = telegraphs.length - 1; i >= 0; i--) {
@@ -915,9 +980,11 @@ function update(dt) {
 
   updateAllies(dt);
   updateProjs(dt);
+  updatePowerWaves(dt);
   updateBoss(dt);
   updateEbullets(dt);
   updatePickups(dt);
+  G.flash = Math.max(0, G.flash - dt * 1.3);
 
   // boss timing
   if (!G.bossWarned && G.time >= BOSS_TIME - 15) {
@@ -1180,6 +1247,12 @@ function render(dt) {
     } else if (fx.type === 'explo') {
       ctx.fillStyle = fx.color;
       ctx.beginPath(); ctx.arc(fx.x, fx.y, fx.r * (1 - p * 0.5), 0, 7); ctx.fill();
+    } else if (fx.type === 'shock') {
+      const pr = fx.r * (fx.t / fx.dur);
+      ctx.strokeStyle = fx.color; ctx.lineWidth = 16 * p;
+      ctx.beginPath(); ctx.arc(fx.x, fx.y, pr, 0, 7); ctx.stroke();
+      ctx.globalAlpha = p * 0.3; ctx.fillStyle = '#fff';
+      ctx.beginPath(); ctx.arc(fx.x, fx.y, pr, 0, 7); ctx.fill();
     }
     ctx.globalAlpha = 1;
   }
@@ -1233,14 +1306,36 @@ function render(dt) {
     }
   }
 
-  // joystick visual
-  if (joy.active) {
+  // joystick visuals (left = move, right = aim)
+  for (const [stick, color] of [[joyMove, '#ffffff'], [joyAim, '#ffb74d']]) {
+    if (!stick.active) continue;
     ctx.globalAlpha = 0.25;
-    ctx.strokeStyle = '#fff'; ctx.lineWidth = 3;
-    ctx.beginPath(); ctx.arc(joy.bx, joy.by, 46, 0, 7); ctx.stroke();
-    ctx.fillStyle = '#fff';
-    ctx.beginPath(); ctx.arc(joy.bx + joy.dx * 46, joy.by + joy.dy * 46, 20, 0, 7); ctx.fill();
+    ctx.strokeStyle = color; ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.arc(stick.bx, stick.by, 46, 0, 7); ctx.stroke();
+    ctx.fillStyle = color;
+    ctx.beginPath(); ctx.arc(stick.bx + stick.dx * 46, stick.by + stick.dy * 46, 20, 0, 7); ctx.fill();
     ctx.globalAlpha = 1;
+  }
+
+  // manual-aim direction chevron around the player
+  const av = aimVector();
+  if (av && G.running && !G.over) {
+    const a = Math.atan2(av[1], av[0]);
+    const px = cw / 2, py = ch / 2;  // player is centered
+    ctx.save();
+    ctx.translate(px + Math.cos(a) * 52, py + Math.sin(a) * 52);
+    ctx.rotate(a);
+    ctx.globalAlpha = 0.85;
+    ctx.fillStyle = '#ffb74d';
+    ctx.beginPath(); ctx.moveTo(12, 0); ctx.lineTo(-6, -8); ctx.lineTo(-2, 0); ctx.lineTo(-6, 8); ctx.closePath(); ctx.fill();
+    ctx.restore();
+    ctx.globalAlpha = 1;
+  }
+
+  // powershot flash
+  if (G.flash > 0) {
+    ctx.fillStyle = `rgba(255,255,255,${Math.min(0.55, G.flash)})`;
+    ctx.fillRect(0, 0, cw, ch);
   }
 }
 
@@ -1260,6 +1355,7 @@ function updateHud(dt) {
   $('kills').textContent = '☠ ' + G.kills;
   if (G.boss && G.boss.alive)
     $('boss-hp-bar').style.width = Math.max(0, G.boss.hp / G.boss.maxhp * 100) + '%';
+  updateStrip();
 }
 function updateHudCounts() {
   $('freed').textContent = `⛓ ${freedSet.size}/24`;
@@ -1278,19 +1374,65 @@ function banner(txt) {
 }
 
 // ---------------- Facecard strip & possession ----------------
+// One shared <video> shows the active hero's idle animation on their card.
+const stripCards = new Map();   // heroIdx -> { card, bar }
+let stripVideo = null;
+function getStripVideo() {
+  if (!stripVideo) {
+    stripVideo = document.createElement('video');
+    stripVideo.muted = true; stripVideo.loop = true; stripVideo.autoplay = true;
+    stripVideo.playsInline = true; stripVideo.setAttribute('playsinline', '');
+    stripVideo.className = 'fc-video';
+    stripVideo.onerror = () => { stripVideo.style.display = 'none'; };
+  }
+  return stripVideo;
+}
+
 function rebuildStrip() {
   const strip = $('facecard-strip');
   strip.innerHTML = '';
-  const list = [...freedSet];
-  for (const idx of list) {
+  stripCards.clear();
+  for (const idx of freedSet) {
     const card = document.createElement('div');
-    card.className = 'facecard' + (idx === player.heroIdx ? ' active' : '');
+    card.className = 'facecard';
+    card.style.setProperty('--glow', HEROES[idx].accent);
     card.appendChild(Sprites.portrait(idx, 88));
+    const bar = document.createElement('div');
+    bar.className = 'fc-bar';
+    bar.innerHTML = '<i></i>';
+    card.appendChild(bar);
+    const zap = document.createElement('div');
+    zap.className = 'fc-zap';
+    zap.textContent = '⚡';
+    card.appendChild(zap);
     card.addEventListener('pointerdown', e => {
       e.stopPropagation();
-      possess(idx);
+      if (idx === player.heroIdx) powershot();   // tap your own glowing card to unleash
+      else possess(idx);
     });
     strip.appendChild(card);
+    stripCards.set(idx, { card, bar: bar.firstChild });
+  }
+  updateStrip();
+}
+
+function updateStrip() {
+  for (const [idx, els] of stripCards) {
+    const hs = heroState[idx] || { tier: 0, charge: 0 };
+    const active = player && idx === player.heroIdx;
+    els.card.className =
+      `facecard tier${hs.tier}` + (hs.charge >= 1 ? ' ready' : '') + (active ? ' active' : '');
+    els.bar.style.width = Math.min(100, hs.charge * 100) + '%';
+    if (active) {
+      const v = getStripVideo();
+      if (v.parentElement !== els.card || v.dataset.hero !== HEROES[idx].id) {
+        v.dataset.hero = HEROES[idx].id;
+        v.style.display = '';
+        v.src = `assets/video/${HEROES[idx].id}.mp4`;
+        els.card.appendChild(v);
+        v.play().catch(() => {});
+      }
+    }
   }
 }
 
@@ -1311,7 +1453,71 @@ function possess(idx) {
   Sound.sfx.possess();
   Sound.playFile(`assets/audio/heroes/${HEROES[idx].id}_entrance.wav`, 0.8);
   banner(`YOU ARE NOW ${HEROES[idx].name.toUpperCase()}`);
-  rebuildStrip();
+  if (heroState[idx] && heroState[idx].charge >= 1 && !G.powerHintShown) {
+    G.powerHintShown = true;
+    setTimeout(() => banner('⚡ TAP YOUR CARD AGAIN — POWERSHOT READY ⚡'), 1400);
+  }
+  updateStrip();
+}
+
+// ---------------- Powershot ----------------
+function powershot() {
+  if (!G.running || G.over || !player) return false;
+  const idx = player.heroIdx, hs = heroState[idx];
+  if (!hs || hs.charge < 1) return false;
+  hs.charge = 0;
+  const hero = HEROES[idx];
+  const w = hero.weapons[0];
+  const mul = G.mods.dmg * heroDmgMul(idx);
+  const base = w.dmg || 14;
+
+  // shockwave: heavy damage + huge knockback around the hero
+  const R = 350 * G.mods.area;
+  eachEnemyNear(player.x, player.y, R + 40, e => {
+    if ((e.x - player.x) ** 2 + (e.y - player.y) ** 2 < (R + e.r) ** 2)
+      damageEnemy(e, base * 6 * mul, { knock: 520, kx: e.x - player.x, ky: e.y - player.y, src: idx });
+  });
+  if (G.boss && G.boss.alive && (G.boss.x - player.x) ** 2 + (G.boss.y - player.y) ** 2 < (R + G.boss.r) ** 2)
+    damageBoss(base * 8 * mul, { src: idx });
+  for (const c of cages) {
+    if (!c.broken && (c.x - player.x) ** 2 + (c.y - player.y) ** 2 < (R + 30) ** 2) damageCage(c, base * 6 * mul);
+  }
+
+  // three expanding rings of the hero's own projectiles
+  for (let wv = 0; wv < 3; wv++) powerWaves.push({ t: wv * 0.14, idx, wave: wv });
+
+  effects.push({ type: 'shock', x: player.x, y: player.y, r: R, t: 0, dur: 0.5, color: hero.accent });
+  G.flash = 0.4;
+  G.shake = Math.max(G.shake, 12);
+  player.iv = Math.max(player.iv, 1.2);
+  Sound.playFile(`assets/audio/heroes/${hero.id}_entrance.wav`, 1);
+  Sound.sfx.nova();
+  buzz(70);
+  banner(`⚡ ${hero.name.toUpperCase()} POWERSHOT ⚡`);
+  return true;
+}
+
+function updatePowerWaves(dt) {
+  for (let i = powerWaves.length - 1; i >= 0; i--) {
+    const pw = powerWaves[i];
+    pw.t -= dt;
+    if (pw.t > 0) continue;
+    powerWaves.splice(i, 1);
+    const f = player.heroIdx === pw.idx ? player : allies.find(a => a.heroIdx === pw.idx);
+    if (!f) continue;
+    const hero = HEROES[pw.idx], w = hero.weapons[0];
+    const mul = G.mods.dmg * heroDmgMul(pw.idx);
+    const n = 16;
+    for (let k = 0; k < n; k++) {
+      const a = k / n * 6.283 + pw.wave * 0.13;
+      const spd = 330 + pw.wave * 70;
+      spawnProj({
+        x: f.x, y: f.y, vx: Math.cos(a) * spd, vy: Math.sin(a) * spd,
+        dmg: (w.dmg || 14) * 1.6 * mul, pierce: 2, size: Math.max(8, (w.size || 7) * 1.2), life: 1.0,
+        color: hero.accent, rainbow: w.rainbow, knock: 120, src: pw.idx,
+      });
+    }
+  }
 }
 
 // ---------------- Level up ----------------
@@ -1347,7 +1553,10 @@ function openRoster() {
     const isYou = i === player.heroIdx;
     const freed = freedSet.has(i);
     card.className = 'hero-card' + (isYou ? ' you' : freed ? '' : ' caged');
-    card.innerHTML = `<div class="hc-name">${h.name}</div><div class="hc-state">${isYou ? 'YOU' : freed ? 'TAP TO POSSESS' : 'IMPRISONED'}</div>`;
+    const hs = heroState[i] || { tier: 0 };
+    const state = isYou ? 'YOU' : freed ? 'TAP TO POSSESS' : 'IMPRISONED';
+    card.innerHTML = `<div class="hc-name">${h.name}</div><div class="hc-state">${state}${freed ? ' · ' + TIER_NAMES[hs.tier] : ''}</div>`;
+    if (freed) card.style.borderColor = TIER_COLORS[hs.tier];
     card.insertBefore(Sprites.portrait(i, 88), card.firstChild);
     if (freed && !isYou) card.addEventListener('pointerdown', () => {
       possess(i);
@@ -1368,6 +1577,9 @@ function newGame(heroIdx) {
   G.time = 0; G.kills = 0; G.level = 1; G.xp = 0; G.xpNext = 10;
   G.spawnAcc = 0; G.boss = null; G.bossWarned = false; G.shake = 0;
   G.sawDemonder = false; G.sawClubbo = false;
+  G.flash = 0; G.powerHintShown = false;
+  heroState = HEROES.map(() => ({ dmg: 0, tier: 0, charge: 0 }));
+  powerWaves = [];
   G.mods = { dmg: 1, rate: 1, spd: 1, hpBonus: 0, ally: 1, magnet: 1, regen: 0, area: 1 };
 
   for (const e of enemies) e.alive = false;
@@ -1507,6 +1719,15 @@ function showDetail(i) {
   const pd = $('hero-detail-portrait');
   pd.innerHTML = '';
   pd.appendChild(Sprites.portrait(i, 128));
+  // idle animation over the portrait (portrait stays as fallback if the video can't play)
+  const v = document.createElement('video');
+  v.muted = true; v.loop = true; v.autoplay = true;
+  v.playsInline = true; v.setAttribute('playsinline', '');
+  v.className = 'detail-video';
+  v.onerror = () => v.remove();
+  v.src = `assets/video/${h.id}.mp4`;
+  pd.appendChild(v);
+  v.play().catch(() => v.remove());
   $('hero-detail-name').textContent = `${h.name} — ${h.title}`;
   $('hero-detail-power').textContent = h.power;
   $('hero-detail-desc').textContent = h.desc;
@@ -1551,7 +1772,9 @@ window.__balitopia = {
   allies: () => allies,
   cages: () => cages,
   freed: () => freedSet,
-  possess, breakCage, newGame, spawnEnemy, spawnBoss,
+  heroState: () => heroState,
+  joys: { move: joyMove, aim: joyAim },
+  possess, breakCage, newGame, spawnEnemy, spawnBoss, powershot, addDamage,
 };
 
 })();
