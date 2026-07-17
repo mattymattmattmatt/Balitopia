@@ -158,15 +158,19 @@ function makeFighter(heroIdx, x, y) {
 function maxHP() { return HEROES[player.heroIdx].hp + G.mods.hpBonus; }
 
 // ---------------- Spatial hash ----------------
-let hash = new Map();
+// Cell arrays are pooled across frames (generation-stamped) so rebuilding the
+// hash 60x/sec allocates nothing — no GC hitches when the horde is thick.
+const hash = new Map();
+let hashGen = 0;
 function buildHash() {
-  hash.clear();
+  hashGen++;
   for (let i = 0; i < MAX_ENEMIES; i++) {
     const e = enemies[i];
     if (!e.alive) continue;
     const k = ((e.x / CELL) | 0) * 4096 + ((e.y / CELL) | 0);
     let a = hash.get(k);
-    if (!a) { a = []; hash.set(k, a); }
+    if (!a) { a = []; a.gen = 0; hash.set(k, a); }
+    if (a.gen !== hashGen) { a.length = 0; a.gen = hashGen; }
     a.push(e);
   }
 }
@@ -175,7 +179,8 @@ function eachEnemyNear(x, y, r, cb) {
   const y0 = ((y - r) / CELL) | 0, y1 = ((y + r) / CELL) | 0;
   for (let cx = x0; cx <= x1; cx++) for (let cy = y0; cy <= y1; cy++) {
     const a = hash.get(cx * 4096 + cy);
-    if (a) for (let i = 0; i < a.length; i++) { if (cb(a[i]) === false) return; }
+    if (a && a.gen === hashGen)
+      for (let i = 0; i < a.length; i++) { if (cb(a[i]) === false) return; }
   }
 }
 function nearestTarget(x, y, maxD, includeCages) {
@@ -746,7 +751,7 @@ function updateEnemies(dt) {
 
     // separation (cheap: only same cell, first few)
     const a = hash.get(((e.x / CELL) | 0) * 4096 + ((e.y / CELL) | 0));
-    if (a) {
+    if (a && a.gen === hashGen) {
       let checked = 0;
       for (let j = 0; j < a.length && checked < 4; j++) {
         const o = a[j];
@@ -1381,19 +1386,25 @@ function render(dt) {
 // ---------------- HUD ----------------
 const $ = id => document.getElementById(id);
 let hudTick = 0;
+const hudCache = {};   // skip DOM writes when the value hasn't changed
+function setHud(id, prop, val) {
+  if (hudCache[id] === val) return;
+  hudCache[id] = val;
+  if (prop === 'w') $(id).style.width = val; else $(id).textContent = val;
+}
 function updateHud(dt) {
   hudTick -= dt;
   if (hudTick > 0) return;
   hudTick = 0.12;
-  $('hp-bar').style.width = Math.max(0, player.hp / maxHP() * 100) + '%';
-  $('hp-text').textContent = `${Math.ceil(player.hp)} / ${maxHP()}`;
-  $('xp-bar').style.width = Math.min(100, G.xp / G.xpNext * 100) + '%';
-  $('lvl-text').textContent = 'LV ' + G.level;
+  setHud('hp-bar', 'w', Math.round(Math.max(0, player.hp / maxHP() * 100)) + '%');
+  setHud('hp-text', 't', `${Math.ceil(player.hp)} / ${maxHP()}`);
+  setHud('xp-bar', 'w', Math.round(Math.min(100, G.xp / G.xpNext * 100)) + '%');
+  setHud('lvl-text', 't', 'LV ' + G.level);
   const t = G.time | 0;
-  $('timer').textContent = `${(t / 60) | 0}:${String(t % 60).padStart(2, '0')}`;
-  $('kills').textContent = '☠ ' + G.kills;
+  setHud('timer', 't', `${(t / 60) | 0}:${String(t % 60).padStart(2, '0')}`);
+  setHud('kills', 't', '☠ ' + G.kills);
   if (G.boss && G.boss.alive)
-    $('boss-hp-bar').style.width = Math.max(0, G.boss.hp / G.boss.maxhp * 100) + '%';
+    setHud('boss-hp-bar', 'w', Math.max(0, G.boss.hp / G.boss.maxhp * 100).toFixed(1) + '%');
   updateStrip();
 }
 function updateHudCounts() {
@@ -1459,9 +1470,10 @@ function updateStrip() {
   for (const [idx, els] of stripCards) {
     const hs = heroState[idx] || { tier: 0, charge: 0 };
     const active = player && idx === player.heroIdx;
-    els.card.className =
-      `facecard tier${hs.tier}` + (hs.charge >= 1 ? ' ready' : '') + (active ? ' active' : '');
-    els.bar.style.width = Math.min(100, hs.charge * 100) + '%';
+    const cls = `facecard tier${hs.tier}` + (hs.charge >= 1 ? ' ready' : '') + (active ? ' active' : '');
+    if (els.cls !== cls) { els.cls = cls; els.card.className = cls; }
+    const barW = Math.round(Math.min(100, hs.charge * 100)) + '%';
+    if (els.barW !== barW) { els.barW = barW; els.bar.style.width = barW; }
     if (active) {
       const v = getStripVideo();
       if (v.parentElement !== els.card || v.dataset.hero !== HEROES[idx].id) {
