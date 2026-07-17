@@ -1630,6 +1630,11 @@ function newGame(heroIdx) {
   $('hud').classList.remove('hidden');
   updateHudCounts();
   rebuildStrip();
+  try {
+    const save = loadSave();
+    save.lastHero = heroIdx;
+    localStorage.setItem('balitopia', JSON.stringify(save));
+  } catch (e) {}
   Sound.stopPreview();
   const region = ['region-land', 'region-sea', 'region-sky'][(Math.random() * 3) | 0];
   Sound.playMusic(`music/${region}.mp3`);
@@ -1649,7 +1654,7 @@ function endGame(won) {
 
   // persist bests
   try {
-    const best = JSON.parse(localStorage.getItem('balitopia') || '{}');
+    const best = loadSave();
     best.bestKills = Math.max(best.bestKills || 0, G.kills);
     best.bestTime = Math.max(best.bestTime || 0, G.time | 0);
     best.wins = (best.wins || 0) + (won ? 1 : 0);
@@ -1674,6 +1679,18 @@ function endGame(won) {
 
 // ---------------- Menus ----------------
 let selectedHero = 0;
+const loadSave = () => { try { return JSON.parse(localStorage.getItem('balitopia') || '{}'); } catch (e) { return {}; } };
+
+function enterApp() {
+  Sound.ensure();
+  Sound.playMusic('music/title.mp3');
+  try { screen.orientation && screen.orientation.lock && screen.orientation.lock('landscape').catch(() => {}); } catch (e) {}
+  try {
+    const fs = document.documentElement.requestFullscreen && document.documentElement.requestFullscreen();
+    if (fs && fs.catch) fs.catch(() => {});
+  } catch (e) {}
+}
+
 function buildTitle() {
   $('story-box').innerHTML = STORY.intro.map(p => `<p>${p}</p>`).join('') +
     `<div id="poster-row">
@@ -1681,15 +1698,27 @@ function buildTitle() {
        <figure><img src="assets/img/poster_demonder.jpg" alt="Demonder"><figcaption>DEMONDER</figcaption></figure>
        <figure><img src="assets/img/poster_clubbo.jpg" alt="Clubbo"><figcaption>CLUBBO</figcaption></figure>
      </div>`;
-  $('btn-title-continue').addEventListener('click', () => {
-    Sound.ensure();
-    Sound.playMusic('music/title.mp3');
-    try { screen.orientation && screen.orientation.lock && screen.orientation.lock('landscape').catch(() => {}); } catch (e) {}
-    try {
-      const fs = document.documentElement.requestFullscreen && document.documentElement.requestFullscreen();
-      if (fs && fs.catch) fs.catch(() => {});
-    } catch (e) {}
+
+  // CONTINUE appears once the island knows you (any previous run)
+  const save = loadSave();
+  if (save.lastHero !== undefined) {
+    selectedHero = Math.max(0, Math.min(HEROES.length - 1, save.lastHero));
+    $('btn-menu-continue').classList.remove('hidden');
+  }
+
+  $('btn-menu-start').addEventListener('click', () => {
+    enterApp();
     $('screen-title').classList.add('hidden');
+    $('screen-story').classList.remove('hidden');
+  });
+  $('btn-menu-continue').addEventListener('click', () => {
+    enterApp();
+    $('screen-title').classList.add('hidden');
+    buildSelect();
+    $('screen-select').classList.remove('hidden');
+  });
+  $('btn-story-continue').addEventListener('click', () => {
+    $('screen-story').classList.add('hidden');
     buildSelect();
     $('screen-select').classList.remove('hidden');
   });
