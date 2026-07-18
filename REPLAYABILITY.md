@@ -41,9 +41,13 @@ real damage check that rewards freeing more Guardians and leaning on powershots.
 - **Ladder loop:** win → unlock a harder tier → higher ceiling on score.
 - **Score loop:** the leaderboard turns every run into an attempt to beat your own #1.
 
-## Parked ideas (say the word and I'll build them)
+### 6. Endless mode (shipped)
+Killing King Glob no longer ends the run — it starts the next **round**: enemies gain +45% HP
+and +30% damage per round, and Glob returns every 2:30 with +60% HP, arriving pre-enraged.
+Each kill banks 8,000 score (×difficulty); the run ends only at death, and any run with at
+least one Glob kill counts as a win (crowns ×N on the leaderboard).
 
-- **Endless mode** after victory — King Glob keeps coming back bigger; pure score chase.
+## Parked ideas (say the word and I'll build them)
 - **Daily seeded run** — same map/cages/spawns for everyone that day; a dated high-score board.
 - **Meta-currency + permanent upgrades** — earn shells per run, spend on small starting perks
   (roguelite meta-progression — the strongest long-term hook, but the biggest build).

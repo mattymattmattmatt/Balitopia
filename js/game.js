@@ -47,34 +47,31 @@ window.addEventListener('keydown', e => {
 });
 window.addEventListener('keyup', e => { keys[e.code] = false; });
 
-// Two-thumb controls: left half of the screen moves, right half aims.
+// Controls: left half of the screen is the move stick; tapping the right half
+// fires your powershot (weapons auto-aim). Face cards still swap Guardians.
 const joyMove = { id: null, bx: 0, by: 0, dx: 0, dy: 0, active: false };
-const joyAim  = { id: null, bx: 0, by: 0, dx: 0, dy: 0, active: false };
 
 canvas.addEventListener('pointerdown', e => {
-  const stick = e.clientX < cw / 2 ? joyMove : joyAim;
-  if (stick.id !== null) return;
-  stick.id = e.pointerId; stick.bx = e.clientX; stick.by = e.clientY;
-  stick.dx = 0; stick.dy = 0; stick.active = true;
+  if (e.clientX >= cw / 2) { powershot(); return; }   // right-half tap = powershot
+  if (joyMove.id !== null) return;
+  joyMove.id = e.pointerId; joyMove.bx = e.clientX; joyMove.by = e.clientY;
+  joyMove.dx = 0; joyMove.dy = 0; joyMove.active = true;
 });
 window.addEventListener('pointermove', e => {
-  const stick = e.pointerId === joyMove.id ? joyMove : e.pointerId === joyAim.id ? joyAim : null;
-  if (!stick) return;
-  let dx = e.clientX - stick.bx, dy = e.clientY - stick.by;
+  if (e.pointerId !== joyMove.id) return;
+  let dx = e.clientX - joyMove.bx, dy = e.clientY - joyMove.by;
   const len = Math.hypot(dx, dy), max = 58;
   if (len > max) {
     // drag the base along so direction changes feel instant
-    stick.bx = e.clientX - dx / len * max;
-    stick.by = e.clientY - dy / len * max;
+    joyMove.bx = e.clientX - dx / len * max;
+    joyMove.by = e.clientY - dy / len * max;
     dx = dx / len * max; dy = dy / len * max;
   }
-  stick.dx = dx / max; stick.dy = dy / max;
+  joyMove.dx = dx / max; joyMove.dy = dy / max;
 });
 const joyEnd = e => {
-  for (const stick of [joyMove, joyAim]) {
-    if (e.pointerId !== stick.id) continue;
-    stick.id = null; stick.active = false; stick.dx = 0; stick.dy = 0;
-  }
+  if (e.pointerId !== joyMove.id) return;
+  joyMove.id = null; joyMove.active = false; joyMove.dx = 0; joyMove.dy = 0;
 };
 window.addEventListener('pointerup', joyEnd);
 window.addEventListener('pointercancel', joyEnd);
@@ -89,13 +86,6 @@ function moveVector() {
   const l = Math.hypot(mx, my);
   if (l > 1) { mx /= l; my /= l; }
   return [mx, my];
-}
-// manual aim from the right thumb (null = auto-aim); small deadzone
-function aimVector() {
-  if (!joyAim.active) return null;
-  const l = Math.hypot(joyAim.dx, joyAim.dy);
-  if (l < 0.22) return null;
-  return [joyAim.dx / l, joyAim.dy / l];
 }
 
 const buzz = ms => { try { navigator.vibrate && navigator.vibrate(ms); } catch (e) {} };
@@ -129,10 +119,14 @@ function addDamage(src, amt) {
     Sound.sfx.tierup();
     buzz(30);
     const f = player.heroIdx === src ? player : allies.find(a => a.heroIdx === src);
-    if (f) spawnParts(f.x, f.y - 20, TIER_COLORS[hs.tier], 18, 170);
+    if (f) {
+      spawnParts(f.x, f.y - 20, TIER_COLORS[hs.tier], 18, 170);
+      effects.push({ type: 'tierup', f, color: TIER_COLORS[hs.tier], t: 0, dur: 0.9 });
+    }
   }
   if (hs.charge < 1) {
-    hs.charge = Math.min(1, hs.charge + amt / (POWER_NEED * (1 + hs.tier * 0.5)));
+    const gain = amt * (G.mods.chargeMul || 1) / (POWER_NEED * (1 + hs.tier * 0.5));
+    hs.charge = Math.min(1, hs.charge + gain);
     if (hs.charge >= 1 && src === player.heroIdx) { Sound.sfx.powerReady(); buzz(20); }  // your powershot is ready
   }
 }
@@ -211,19 +205,6 @@ function nearestCage(x, y, maxD) {
   }
   return best;
 }
-function nearestInCone(x, y, maxD, ang, half) {
-  let best = null, bd = maxD * maxD;
-  const check = (ex, ey, e) => {
-    const d = (ex - x) ** 2 + (ey - y) ** 2;
-    if (d >= bd) return;
-    let da = Math.atan2(ey - y, ex - x) - ang;
-    da = Math.atan2(Math.sin(da), Math.cos(da));
-    if (Math.abs(da) < half) { bd = d; best = e; }
-  };
-  eachEnemyNear(x, y, maxD, e => check(e.x, e.y, e));
-  if (G.boss && G.boss.alive) check(G.boss.x, G.boss.y, G.boss);
-  return best;
-}
 
 // ---------------- Spawning ----------------
 function spawnEnemy(type, tier, x, y) {
@@ -232,15 +213,17 @@ function spawnEnemy(type, tier, x, y) {
   if (!e) return null;
   const def = ENEMIES[type];
   const scale = type === 'minyar' ? 0.72 + Math.random() * 0.85 : 0.85 + Math.random() * 0.5;
-  const timeMult = 1 + (G.time / 60) * 0.16;
+  const timeMult = 1 + (G.time / 60) * 0.18;
   const tm = TIERS[tier].mult;
   const diff = G.diff || DIFFICULTIES[0];
+  const roundHp = 1 + ROUND_EHP * ((G.round || 1) - 1);     // endless escalation
+  const roundDmg = 1 + ROUND_EDMG * ((G.round || 1) - 1);
   e.alive = true; e.type = type; e.tier = tier; e.scale = scale;
   e.x = x; e.y = y;
-  e.maxhp = def.hp * tm * Math.pow(scale, 1.7) * timeMult * diff.ehp;
+  e.maxhp = def.hp * tm * Math.pow(scale, 1.7) * timeMult * diff.ehp * roundHp;
   e.hp = e.maxhp;
   e.spd = def.spd * (1.12 - scale * 0.18) * (0.9 + Math.random() * 0.25);
-  e.dmg = def.dmg * (1 + tier * 0.3) * scale * diff.edmg;
+  e.dmg = def.dmg * (1 + tier * 0.3) * scale * diff.edmg * roundDmg;
   e.lastSrc = undefined;
   e.xp = Math.max(1, Math.round(def.xp * (1 + tier * 0.9) * scale));
   e.r = def.r * scale;
@@ -353,15 +336,34 @@ function damageBoss(dmg, o) {
   if (o.slow) b.slowT = Math.max(b.slowT, o.slow * 0.3);
   addFloater(b.x + (Math.random() - 0.5) * 60, b.y - 90, Math.round(dmg), '#ffd54f');
   Sound.sfx.bossHit();
-  if (b.hp <= 0) {
-    b.alive = false;
-    G.shake = 18;
-    spawnParts(b.x, b.y, '#8bc34a', 60, 260);
-    spawnParts(b.x, b.y, '#ffd54f', 40, 200);
-    Sound.playFile('assets/audio/enemies/glob_defeat.wav', 1);
-    setTimeout(() => Sound.playFile('assets/audio/sfx/crown_crack.wav', 0.9), 900);
-    endGame(true);
-  }
+  if (b.hp <= 0) killBoss(b);
+}
+
+// Endless mode: killing King Glob rolls the run into the next round.
+// Enemies get tougher, and he crawls back out of the mountain even angrier.
+function killBoss(b) {
+  b.alive = false;
+  G.bossKills++;
+  G.shake = 18;
+  spawnParts(b.x, b.y, '#8bc34a', 60, 260);
+  spawnParts(b.x, b.y, '#ffd54f', 40, 200);
+  for (let i = 0; i < 6; i++)
+    dropGem(b.x + (Math.random() - 0.5) * 120, b.y + (Math.random() - 0.5) * 90, 25);
+  Sound.playFile('assets/audio/enemies/glob_defeat.wav', 1);
+  setTimeout(() => Sound.playFile('assets/audio/sfx/crown_crack.wav', 0.9), 900);
+  G.boss = null;
+  G.round++;
+  G.nextBossAt = G.time + BOSS_RESPAWN;
+  G.bossWarned = false;
+  G.healPct(0.5);
+  $('boss-hp-wrap').classList.add('hidden');
+  banner(G.bossKills === 1 ? '👑 KING GLOB IS DOWN — BALITOPIA IS FREE!' : `👑 GLOB SLAIN ×${G.bossKills}!`);
+  banner(`🌀 ROUND ${G.round} — THE ISLAND TREMBLES AGAIN`);
+  buzz(60);
+  Sound.playMusic('music/victory.mp3', { loop: false, vol: 0.6 });
+  setTimeout(() => {
+    if (!G.over && !G.boss) Sound.playMusic(`music/${G.region}.mp3`);
+  }, 7000);
 }
 
 function damageCage(c, dmg) {
@@ -395,7 +397,20 @@ function hurtPlayer(dmg) {
   G.hurtFlash = 0.4;
   Sound.sfx.hurt();
   buzz(25);
-  if (player.hp <= 0) { player.hp = 0; endGame(false); }
+  if (player.hp <= 0) {
+    if (G.mods.revive > 0) {                      // Second Wind: cheat death once
+      G.mods.revive--;
+      player.hp = maxHP() * 0.5;
+      player.iv = 2;
+      G.flash = 0.35;
+      banner('🕯️ SECOND WIND!');
+      Sound.sfx.heal();
+      effects.push({ type: 'tierup', f: player, color: '#fff59d', t: 0, dur: 0.9 });
+      return;
+    }
+    player.hp = 0;
+    endGame();
+  }
 }
 
 // ---------------- Weapons ----------------
@@ -421,7 +436,7 @@ function fireWeapon(f, w, ws, isAlly, dt) {
   const m = G.mods;
   const src = f.heroIdx;
   const rateMul = m.rate * (isAlly ? 1.25 : 1);
-  const dmgMul = m.dmg * (isAlly ? 0.6 * m.ally : 1) * heroDmgMul(src);
+  const dmgMul = m.dmg * (isAlly ? 0.55 * m.ally : 1) * heroDmgMul(src);
   const areaMul = m.area;
 
   if (w.type === 'orbit') {
@@ -488,36 +503,26 @@ function fireWeapon(f, w, ws, isAlly, dt) {
     for (let i = 0; i < w.count; i++) {
       const a = i / w.count * 6.283 + Math.random() * 0.2;
       spawnProj({
-        x: f.x, y: f.y, vx: Math.cos(a) * w.speed, vy: Math.sin(a) * w.speed,
-        dmg: w.dmg * dmgMul, pierce: 1, size: w.size * areaMul, life: w.life,
-        color: w.color, knock: w.knock || 0, src,
+        x: f.x, y: f.y, vx: Math.cos(a) * w.speed * m.pspd, vy: Math.sin(a) * w.speed * m.pspd,
+        dmg: w.dmg * dmgMul, pierce: 1 + m.pierceBonus, size: w.size * areaMul, life: w.life * m.plife,
+        color: w.color, knock: (w.knock || 0) * m.knockMul, src,
       });
     }
     if (!isAlly) Sound.sfx.nova();
     return;
   }
 
-  // ----- aimed weapons need a target (or the player's right thumb) -----
+  // ----- aimed weapons need a target -----
   const range = w.type === 'beam' ? (w.length * areaMul) : (isAlly ? 540 : 640);
   let target = nearestTarget(f.x, f.y, range, true);
-  const av = isAlly ? null : aimVector();
+  // rescue priority: a cage right next to you outranks the horde
+  const closeCage = nearestCage(f.x, f.y, isAlly ? 210 : 250);
+  if (closeCage) target = closeCage;
+  const [mx, my] = moveVector();
   let ang;
-  if (av) {
-    // manual aim overrides auto-aim entirely
-    ang = Math.atan2(av[1], av[0]);
-    if (w.type === 'chain') {
-      target = nearestInCone(f.x, f.y, range, ang, 0.75) || target || nearestCage(f.x, f.y, 250);
-      if (!target) return;
-    }
-  } else {
-    // rescue priority: a cage right next to you outranks the horde
-    const closeCage = nearestCage(f.x, f.y, isAlly ? 210 : 250);
-    if (closeCage) target = closeCage;
-    const [mx, my] = moveVector();
-    if (target) ang = Math.atan2(target.y - f.y, target.x - f.x);
-    else if (!isAlly && (mx || my)) ang = Math.atan2(my, mx);
-    else return;
-  }
+  if (target) ang = Math.atan2(target.y - f.y, target.x - f.x);
+  else if (!isAlly && (mx || my)) ang = Math.atan2(my, mx);
+  else return;
 
   ws.cd = interval;
   if (ang !== undefined && Math.cos(ang) !== 0) f.fx = Math.cos(ang) >= 0 ? 1 : -1;
@@ -610,11 +615,11 @@ function fireWeapon(f, w, ws, isAlly, dt) {
     else if (w.spread) a += (Math.random() - 0.5) * w.spread;
     spawnProj({
       x: f.x, y: f.y - 12,
-      vx: Math.cos(a) * w.speed, vy: Math.sin(a) * w.speed,
-      dmg: w.dmg * dmgMul, pierce: w.pierce, size: w.size * areaMul, life: w.life,
+      vx: Math.cos(a) * w.speed * m.pspd, vy: Math.sin(a) * w.speed * m.pspd,
+      dmg: w.dmg * dmgMul, pierce: (w.pierce || 0) + m.pierceBonus, size: w.size * areaMul, life: w.life * m.plife,
       color: w.color, rainbow: w.rainbow, homing: w.homing, boomerang: w.boomerang, explode: w.explode ? w.explode * areaMul : 0,
       split: w.split, slow: w.slow, poison: w.poison ? w.poison * dmgMul / Math.max(1, w.dmg) * w.dmg : 0,
-      poisonT: w.poisonT, knock: w.knock, owner: f, src,
+      poisonT: w.poisonT, knock: (w.knock || 0) * m.knockMul, owner: f, src,
     });
   }
   if (!isAlly) Sound.sfx.shoot();
@@ -776,20 +781,22 @@ function updateEnemies(dt) {
 function spawnBoss() {
   const a = Math.random() * 6.283;
   const diff = G.diff || DIFFICULTIES[0];
-  const hp = BOSS.hp * diff.bhp;
+  const round = G.round || 1;
+  const hp = BOSS.hp * diff.bhp * (1 + ROUND_BHP * (round - 1));
   G.boss = {
     alive: true, isBoss: true,
     x: Math.min(WORLD - 200, Math.max(200, player.x + Math.cos(a) * 640)),
     y: Math.min(WORLD - 200, Math.max(200, player.y + Math.sin(a) * 640)),
-    hp, maxhp: hp, r: BOSS.r, spd: BOSS.spd, dmg: BOSS.dmg * diff.edmg,
-    slowT: 0, flash: 0, wob: 0, enraged: false,
+    hp, maxhp: hp, r: BOSS.r, spd: BOSS.spd, dmg: BOSS.dmg * diff.edmg * (1 + ROUND_EDMG * (round - 1)),
+    slowT: 0, flash: 0, wob: 0, enraged: round > 1,   // returning Glob starts angry
     volleyCd: 4, summonCd: 8, slamCd: 12,
   };
+  if (G.boss.enraged) G.boss.spd *= 1.3;
   Sound.playMusic('enemies/glob.mp3');                      // King Glob's theme
   Sound.playFile('assets/audio/enemies/glob_entrance.wav', 0.95);
   setTimeout(() => Sound.playFile('assets/audio/enemies/glob_laugh.wav', 0.9), 1400);
   G.shake = 14;
-  banner('👑 KING GLOB HAS ARRIVED 👑');
+  banner(round > 1 ? `👑 KING GLOB RETURNS — ROUND ${round} 👑` : '👑 KING GLOB HAS ARRIVED 👑');
   document.getElementById('boss-hp-wrap').classList.remove('hidden');
 }
 
@@ -897,7 +904,7 @@ function updatePickups(dt) {
     g.x += g.vx * dt; g.y += g.vy * dt;
     if (d2 < 28 * 28) {
       g.alive = false;
-      gainXP(g.val);
+      gainXP(g.val * G.mods.xpGain);
     }
   }
   for (let i = hearts.length - 1; i >= 0; i--) {
@@ -969,8 +976,9 @@ function gainXP(v) {
     G.xp -= G.xpNext;
     G.level++;
     G.pendingLv++;
-    G.xpNext = Math.round(6 * Math.pow(G.level, 1.3) + 5);
+    G.xpNext = Math.round(8 * Math.pow(G.level, 1.42) + 6);
     Sound.sfx.level();
+    if (player) effects.push({ type: 'tierup', f: player, color: '#ffd54f', t: 0, dur: 0.8 });
   }
   if (G.pendingLv > 0 && $('screen-levelup').classList.contains('hidden')) showLevelUp();
 }
@@ -1017,12 +1025,12 @@ function update(dt) {
   G.flash = Math.max(0, G.flash - dt * 1.3);
   G.hurtFlash = Math.max(0, G.hurtFlash - dt * 1.6);
 
-  // boss timing
-  if (!G.bossWarned && G.time >= BOSS_TIME - 15) {
+  // boss timing (round 1 at 8:00, endless returns every BOSS_RESPAWN after)
+  if (!G.bossWarned && G.time >= G.nextBossAt - 15) {
     G.bossWarned = true;
     banner('⚠ THE GROUND IS SHAKING... ⚠');
   }
-  if (!G.boss && G.time >= BOSS_TIME) spawnBoss();
+  if (!G.boss && G.time >= G.nextBossAt) spawnBoss();
 
   // camera
   G.cam.x += (player.x - G.cam.x) * Math.min(1, 8 * dt);
@@ -1283,6 +1291,16 @@ function render(dt) {
       ctx.beginPath(); ctx.arc(fx.x, fx.y, pr, 0, 7); ctx.stroke();
       ctx.globalAlpha = p * 0.3; ctx.fillStyle = '#fff';
       ctx.beginPath(); ctx.arc(fx.x, fx.y, pr, 0, 7); ctx.fill();
+    } else if (fx.type === 'tierup') {
+      // level-up burst that follows the Guardian: two expanding rings + a rising halo
+      const fx2 = fx.f, prog = fx.t / fx.dur;
+      ctx.strokeStyle = fx.color; ctx.lineWidth = 3.5 * p; ctx.globalAlpha = p;
+      ctx.beginPath(); ctx.ellipse(fx2.x, fx2.y + 4, 16 + prog * 44, (16 + prog * 44) * 0.45, 0, 0, 7); ctx.stroke();
+      ctx.lineWidth = 2 * p;
+      ctx.beginPath(); ctx.ellipse(fx2.x, fx2.y + 4, 8 + prog * 30, (8 + prog * 30) * 0.45, 0, 0, 7); ctx.stroke();
+      ctx.globalAlpha = p * 0.9;
+      ctx.beginPath(); ctx.arc(fx2.x, fx2.y - 30 - prog * 36, 5 * p + 1, 0, 7);
+      ctx.fillStyle = fx.color; ctx.fill();
     }
     ctx.globalAlpha = 1;
   }
@@ -1340,29 +1358,13 @@ function render(dt) {
     if (G.boss && G.boss.alive) edgeArrow(G.boss.x, G.boss.y, 380, '#ff5252', 0.4, '👑');
   }
 
-  // joystick visuals (left = move, right = aim)
-  for (const [stick, color] of [[joyMove, '#ffffff'], [joyAim, '#ffb74d']]) {
-    if (!stick.active) continue;
+  // move-stick visual
+  if (joyMove.active) {
     ctx.globalAlpha = 0.25;
-    ctx.strokeStyle = color; ctx.lineWidth = 3;
-    ctx.beginPath(); ctx.arc(stick.bx, stick.by, 46, 0, 7); ctx.stroke();
-    ctx.fillStyle = color;
-    ctx.beginPath(); ctx.arc(stick.bx + stick.dx * 46, stick.by + stick.dy * 46, 20, 0, 7); ctx.fill();
-    ctx.globalAlpha = 1;
-  }
-
-  // manual-aim direction chevron around the player
-  const av = aimVector();
-  if (av && G.running && !G.over) {
-    const a = Math.atan2(av[1], av[0]);
-    const px = cw / 2, py = ch / 2;  // player is centered
-    ctx.save();
-    ctx.translate(px + Math.cos(a) * 52, py + Math.sin(a) * 52);
-    ctx.rotate(a);
-    ctx.globalAlpha = 0.85;
-    ctx.fillStyle = '#ffb74d';
-    ctx.beginPath(); ctx.moveTo(12, 0); ctx.lineTo(-6, -8); ctx.lineTo(-2, 0); ctx.lineTo(-6, 8); ctx.closePath(); ctx.fill();
-    ctx.restore();
+    ctx.strokeStyle = '#fff'; ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.arc(joyMove.bx, joyMove.by, 46, 0, 7); ctx.stroke();
+    ctx.fillStyle = '#fff';
+    ctx.beginPath(); ctx.arc(joyMove.bx + joyMove.dx * 46, joyMove.by + joyMove.dy * 46, 20, 0, 7); ctx.fill();
     ctx.globalAlpha = 1;
   }
 
@@ -1407,10 +1409,10 @@ function updateHud(dt) {
   setHud('kills', 't', '☠ ' + G.kills);
   if (G.boss && G.boss.alive)
     setHud('boss-hp-bar', 'w', Math.max(0, G.boss.hp / G.boss.maxhp * 100).toFixed(1) + '%');
-  // King Glob countdown from 6:00 — lets players plan their cage route
-  const etaOn = !G.boss && G.time > BOSS_TIME - 120 && G.time < BOSS_TIME;
+  // King Glob countdown — lets players plan their cage route (and endless returns)
+  const etaOn = !G.boss && G.time > G.nextBossAt - 120 && G.time < G.nextBossAt;
   if (hudCache.etaOn !== etaOn) { hudCache.etaOn = etaOn; $('boss-eta').classList.toggle('hidden', !etaOn); }
-  if (etaOn) setHud('boss-eta', 't', `👑 ${fmtTime(BOSS_TIME - G.time)}`);
+  if (etaOn) setHud('boss-eta', 't', `👑 ${fmtTime(G.nextBossAt - G.time)}`);
   updateStrip();
 }
 function updateHudCounts() {
@@ -1460,9 +1462,10 @@ function getStripVideo() {
 }
 
 function rebuildStrip() {
-  const strip = $('facecard-strip');
-  strip.innerHTML = '';
+  const bottom = $('facecard-strip'), top = $('facecard-strip-top');
+  bottom.innerHTML = ''; top.innerHTML = '';
   stripCards.clear();
+  let n = 0;
   for (const idx of freedSet) {
     const card = document.createElement('div');
     card.className = 'facecard';
@@ -1478,13 +1481,12 @@ function rebuildStrip() {
     card.appendChild(zap);
     card.addEventListener('pointerdown', e => {
       e.stopPropagation();
-      if (idx === player.heroIdx) powershot();   // tap your own glowing card to unleash
+      if (idx === player.heroIdx) powershot();   // your own card still works as a powershot button
       else possess(idx);
     });
-    strip.appendChild(card);
+    (n++ < 12 ? bottom : top).appendChild(card);   // 12 along the bottom, the rest up top
     stripCards.set(idx, { card, bar: bar.firstChild });
   }
-  strip.classList.toggle('scrollable', strip.scrollWidth > strip.clientWidth + 4);
   updateStrip();
 }
 
@@ -1493,11 +1495,7 @@ function updateStrip() {
     const hs = heroState[idx] || { tier: 0, charge: 0 };
     const active = player && idx === player.heroIdx;
     const cls = `facecard tier${hs.tier}` + (hs.charge >= 1 ? ' ready' : '') + (active ? ' active' : '');
-    if (els.cls !== cls) {
-      els.cls = cls; els.card.className = cls;
-      // keep the card you're controlling in view of the scrollable strip
-      if (active) try { els.card.scrollIntoView({ inline: 'nearest', block: 'nearest' }); } catch (e) {}
-    }
+    if (els.cls !== cls) { els.cls = cls; els.card.className = cls; }
     const barW = Math.round(Math.min(100, hs.charge * 100)) + '%';
     if (els.barW !== barW) { els.barW = barW; els.bar.style.width = barW; }
     if (active) {
@@ -1597,24 +1595,38 @@ function updatePowerWaves(dt) {
   }
 }
 
-// ---------------- Level up ----------------
+// ---------------- Level up: 3 face-down mystery cards ----------------
 function showLevelUp() {
   G.running = false;
   const row = $('upgrade-row');
   row.innerHTML = '';
-  const pool = [...UPGRADES];
+  const pool = UPGRADES.filter(u => !(u.once && G.mods.taken[u.id]));
+  let picked = false;
   for (let i = 0; i < 3 && pool.length; i++) {
     const pick = pool.splice((Math.random() * pool.length) | 0, 1)[0];
     const card = document.createElement('div');
-    card.className = 'upgrade-card';
-    card.innerHTML = `<div class="uc-icon">${pick.icon}</div><h3>${pick.name}</h3><p>${pick.desc}</p>`;
+    card.className = 'upgrade-card mystery';
+    card.innerHTML =
+      `<div class="mc-inner">
+         <div class="mc-face mc-front"><span>?</span></div>
+         <div class="mc-face mc-back">
+           <div class="uc-icon">${pick.icon}</div><h3>${pick.name}</h3><p>${pick.desc}</p>
+         </div>
+       </div>`;
     card.addEventListener('pointerdown', () => {
+      if (picked) return;
+      picked = true;
       Sound.sfx.uiClick();
+      card.classList.add('flipped');
+      row.querySelectorAll('.upgrade-card').forEach(c => { if (c !== card) c.classList.add('faded'); });
+      if (pick.once) G.mods.taken[pick.id] = true;
       pick.apply(G.mods, G);
-      G.pendingLv--;
-      $('screen-levelup').classList.add('hidden');
-      if (G.pendingLv > 0) showLevelUp();
-      else if (!G.over) G.running = true;
+      setTimeout(() => {
+        G.pendingLv--;
+        $('screen-levelup').classList.add('hidden');
+        if (G.pendingLv > 0) showLevelUp();
+        else if (!G.over) G.running = true;
+      }, 850);
     });
     row.appendChild(card);
   }
@@ -1659,9 +1671,14 @@ function newGame(heroIdx, diffIdx) {
   G.flash = 0; G.hurtFlash = 0; G.powerHintShown = false;
   G.diff = DIFFICULTIES[Math.max(0, Math.min(DIFFICULTIES.length - 1, diffIdx | 0))];
   G.startHero = heroIdx;
+  G.round = 1; G.bossKills = 0; G.nextBossAt = BOSS_TIME;
   heroState = HEROES.map(() => ({ dmg: 0, tier: 0, charge: 0, kills: 0, control: 0 }));
   powerWaves = [];
-  G.mods = { dmg: 1, rate: 1, spd: 1, hpBonus: 0, ally: 1, magnet: 1, regen: 0, area: 1 };
+  G.mods = {
+    dmg: 1, rate: 1, spd: 1, hpBonus: 0, ally: 1, magnet: 1, regen: 0, area: 1,
+    pierceBonus: 0, pspd: 1, plife: 1, chargeMul: 1, xpGain: 1, knockMul: 1, revive: 0,
+    taken: {},   // `once` upgrades leave the pool after this
+  };
 
   for (const e of enemies) e.alive = false;
   for (const p of projs) p.alive = false;
@@ -1717,8 +1734,8 @@ function newGame(heroIdx, diffIdx) {
     localStorage.setItem('balitopia', JSON.stringify(save));
   } catch (e) {}
   Sound.stopPreview();
-  const region = ['region-land', 'region-sea', 'region-sky'][(Math.random() * 3) | 0];
-  Sound.playMusic(`music/${region}.mp3`);
+  G.region = ['region-land', 'region-sea', 'region-sky'][(Math.random() * 3) | 0];
+  Sound.playMusic(`music/${G.region}.mp3`);
   Sound.playFile(`assets/audio/heroes/${HEROES[heroIdx].id}_entrance.wav`, 0.9);
   bannerQ.length = 0;
   banner(`${HEROES[heroIdx].name.toUpperCase()} — BREAK THE CAGES!`);
@@ -1742,14 +1759,14 @@ const fmtNum = n => n >= 1e6 ? (n / 1e6).toFixed(1).replace(/\.0$/, '') + 'M'
 const fmtTime = s => `${(s / 60) | 0}:${String((s | 0) % 60).padStart(2, '0')}`;
 
 function bossPct() {
-  if (G.victory) return 1;
+  // progress against the CURRENT boss only (kills are scored separately)
   if (G.boss) return Math.max(0, Math.min(1, 1 - G.boss.hp / G.boss.maxhp));
   return 0;
 }
 function computeScore() {
   const diff = G.diff || DIFFICULTIES[0];
   const base = G.kills * 10 + Math.floor(G.time) * 4 + freedSet.size * 300
-    + G.level * 50 + Math.round(bossPct() * 3000) + (G.victory ? 8000 : 0);
+    + G.level * 50 + Math.round(bossPct() * 3000) + G.bossKills * 8000;
   return Math.round(base * diff.score);
 }
 
@@ -1760,7 +1777,8 @@ function saveRun(score) {
     const save = loadSave();
     const rec = {
       score, won: G.victory, heroId: HEROES[G.startHero].id, heroName: HEROES[G.startHero].name,
-      diff: G.diff.id, kills: G.kills, time: G.time | 0, freed: freedSet.size, level: G.level, date: Date.now(),
+      diff: G.diff.id, kills: G.kills, time: G.time | 0, freed: freedSet.size, level: G.level,
+      round: G.round, bossKills: G.bossKills, date: Date.now(),
     };
     const records = Array.isArray(save.records) ? save.records : [];
     records.push(rec);
@@ -1784,10 +1802,15 @@ function saveRun(score) {
 
 function buildStatsScreen(rank) {
   const won = G.victory, diff = G.diff;
-  $('over-title').textContent = won ? 'BALITOPIA IS FREE!' : 'THE TIDE TAKES YOU';
+  $('over-title').textContent =
+    G.bossKills > 1 ? `GLOB SLAIN ×${G.bossKills}!` : won ? 'BALITOPIA IS FREE!' : 'THE TIDE TAKES YOU';
   $('over-title').style.color = won ? '#ffd54f' : '#ef9a9a';
-  $('over-diff').innerHTML = `<span class="diff-badge" style="color:${diff.color};border-color:${diff.color}">◆ ${diff.name}</span>`;
-  $('over-flavor').textContent = won ? 'King Glob is unmade — the Balance holds.' : 'The horde was too many. This time.';
+  $('over-diff').innerHTML =
+    `<span class="diff-badge" style="color:${diff.color};border-color:${diff.color}">◆ ${diff.name}</span>` +
+    (G.round > 1 ? `<span class="diff-badge" style="color:#b388ff;border-color:#b388ff">🌀 ROUND ${G.round}</span>` : '');
+  $('over-flavor').textContent = won
+    ? (G.bossKills > 1 ? 'The Hungry King kept coming back. You kept ending him.' : 'King Glob is unmade — the Balance holds.')
+    : 'The horde was too many. This time.';
   $('over-score').innerHTML =
     `<div class="score-num">${G.score.toLocaleString()}</div>
      <div class="score-lbl">SCORE${rank >= 0 ? ` · #${rank + 1} ALL-TIME` : ''}${rank === 0 ? ' <span class="newbest">NEW BEST!</span>' : ''}</div>`;
@@ -1797,7 +1820,7 @@ function buildStatsScreen(rank) {
     ['☠', G.kills, 'slain'],
     ['⛓', `${freedSet.size}/24`, 'freed'],
     ['★', G.level, 'level'],
-    ['👑', won ? 'SLAIN' : `${Math.round(bossPct() * 100)}%`, 'King Glob'],
+    ['👑', G.bossKills > 0 ? '×' + G.bossKills : `${Math.round(bossPct() * 100)}%`, 'Glob slain'],
   ].map(([ic, v, l]) => `<div class="sum-tile"><span class="sum-ic">${ic}</span><b>${v}</b><span>${l}</span></div>`).join('');
 
   const rows = heroState.map((hs, i) => ({ i, hs })).filter(x => x.hs.dmg > 0 || freedSet.has(x.i))
@@ -1824,15 +1847,16 @@ function buildStatsScreen(rank) {
   $('over-heroes').scrollTop = 0;
 }
 
-function endGame(won) {
+function endGame() {
   if (G.over) return;
-  G.over = true; G.victory = won;
+  G.over = true;
+  // endless: a run always ends in death, but killing Glob at least once counts as a win
+  const won = G.victory = G.bossKills > 0;
   Sound.stopMusic();
-  if (won) Sound.playMusic('music/victory.mp3', { loop: false, vol: 0.65 });
-  else {
-    Sound.playFile('assets/audio/sfx/captured.mp3', 0.9);
-    setTimeout(() => { if (G.over && !G.victory) Sound.playMusic('music/bgm_gameover.mp3', { loop: false, vol: 0.6 }); }, 1800);
-  }
+  Sound.playFile('assets/audio/sfx/captured.mp3', 0.9);
+  setTimeout(() => {
+    if (G.over) Sound.playMusic(won ? 'music/victory.mp3' : 'music/bgm_gameover.mp3', { loop: false, vol: 0.6 });
+  }, 1800);
   G.score = computeScore();
   const rank = saveRun(G.score);
   setTimeout(() => {
@@ -1843,7 +1867,7 @@ function endGame(won) {
     buildStatsScreen(rank);
     $('hud').classList.add('hidden');
     $('screen-over').classList.remove('hidden');
-  }, won ? 1600 : 900);
+  }, 1100);
 }
 
 // ---------------- Records screen (leaderboard + codex) ----------------
@@ -1858,10 +1882,11 @@ function buildRecordsScreen() {
     html += '<div class="rec-list">';
     records.forEach((r, i) => {
       const d = DIFFICULTIES[r.diff] || DIFFICULTIES[0];
+      const crowns = r.bossKills > 1 ? `👑×${r.bossKills} ` : r.won ? '👑 ' : '';
       html += `<div class="rec-row${r.won ? ' won' : ''}">
         <span class="rec-rank">${medal[i] || ('#' + (i + 1))}</span>
         <span class="rec-score">${r.score.toLocaleString()}</span>
-        <span class="rec-hero">${r.won ? '👑 ' : ''}${r.heroName}</span>
+        <span class="rec-hero">${crowns}${r.heroName}</span>
         <span class="rec-diff" style="color:${d.color}">${d.name}</span>
         <span class="rec-meta">${fmtTime(r.time)} · ${r.kills}☠ · ${r.freed}/24</span>
       </div>`;
@@ -2051,7 +2076,8 @@ window.__balitopia = {
   freed: () => freedSet,
   heroState: () => heroState,
   telegraphs: () => telegraphs,
-  joys: { move: joyMove, aim: joyAim },
+  joys: { move: joyMove },
+  hurtPlayer,
   possess, breakCage, newGame, spawnEnemy, spawnBoss, powershot, addDamage,
 };
 

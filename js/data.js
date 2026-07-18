@@ -139,8 +139,12 @@ const ENEMIES = {
   clubbo:   { hp:640, spd:32, dmg:34, xp:30, r:30, dh:118 },
 };
 
-const BOSS = { hp:30000, spd:40, dmg:45, r:66, xp:0, dh:190 };   // the Hungry King is no pushover
-const BOSS_TIME = 480;          // King Glob arrives at 8:00
+const BOSS = { hp:48000, spd:40, dmg:45, r:66, xp:0, dh:190 };   // the Hungry King is no pushover
+const BOSS_TIME = 480;          // King Glob first arrives at 8:00
+const BOSS_RESPAWN = 150;       // endless mode: he returns this many seconds after each kill
+const ROUND_EHP = 0.45;         // endless: +45% enemy HP per round
+const ROUND_EDMG = 0.30;        // endless: +30% enemy damage per round
+const ROUND_BHP = 0.60;         // endless: +60% boss HP per round
 const CAGE_HP = 70;
 
 // ---------- Difficulty / Ascension ----------
@@ -158,18 +162,27 @@ const DIFFICULTIES = [
 // and charges a powershot the same way (glowing card when ready).
 const TIER_NAMES  = ['BASIC', 'EXPERT', 'MASTER', 'SAIYAN', 'SUPER SAIYAN'];
 const TIER_COLORS = ['#4caf50', '#2196f3', '#f44336', '#ff9800', '#ffee58'];
-const TIER_DMG    = [0, 1200, 3500, 8000, 16000];   // damage-dealt thresholds
+const TIER_DMG    = [0, 3200, 9500, 22000, 45000];  // damage-dealt thresholds (SS is a real journey)
 const TIER_BONUS  = 0.10;                           // +10% damage per tier
-const POWER_NEED  = 550;                            // damage per powershot charge (scales with tier)
+const POWER_NEED  = 800;                            // damage per powershot charge (scales with tier)
 
 // ---------- Upgrades ----------
+// Drawn as 3 face-down mystery cards on level-up. `once` upgrades leave the
+// pool after being taken.
 const UPGRADES = [
-  { id:'power',  icon:'💥', name:'Guardian Power', desc:'+20% damage for you and every freed Guardian', apply:m=>m.dmg*=1.2 },
-  { id:'haste',  icon:'⚡', name:'Battle Haste',   desc:'Attack 12% faster',                            apply:m=>m.rate*=0.88 },
-  { id:'swift',  icon:'👟', name:'Swift Feet',     desc:'+10% move speed',                              apply:m=>m.spd*=1.1 },
-  { id:'vital',  icon:'❤️', name:'Vitality',       desc:'+25 max HP and heal 50%',                      apply:(m,g)=>{ m.hpBonus+=25; g.healPct(.5); } },
-  { id:'allies', icon:'🤝', name:'War Chorus',     desc:'Freed Guardians deal +30% damage',             apply:m=>m.ally*=1.3 },
-  { id:'magnet', icon:'🧲', name:'Spirit Magnet',  desc:'+35% pickup range',                            apply:m=>m.magnet*=1.35 },
-  { id:'regen',  icon:'🌿', name:'Island Blessing',desc:'Regenerate +1.2 HP per second',                apply:m=>m.regen+=1.2 },
-  { id:'area',   icon:'🌀', name:'Wide Wrath',     desc:'+15% attack area & projectile size',           apply:m=>m.area*=1.15 },
+  { id:'power',      icon:'💥', name:'Guardian Power', desc:'+20% damage for you and every freed Guardian', apply:m=>m.dmg*=1.2 },
+  { id:'haste',      icon:'⚡', name:'Battle Haste',   desc:'Attack 12% faster',                            apply:m=>m.rate*=0.88 },
+  { id:'swift',      icon:'👟', name:'Swift Feet',     desc:'+10% move speed',                              apply:m=>m.spd*=1.1 },
+  { id:'vital',      icon:'❤️', name:'Vitality',       desc:'+25 max HP and heal 50%',                      apply:(m,g)=>{ m.hpBonus+=25; g.healPct(.5); } },
+  { id:'allies',     icon:'🤝', name:'War Chorus',     desc:'Freed Guardians deal +30% damage',             apply:m=>m.ally*=1.3 },
+  { id:'magnet',     icon:'🧲', name:'Spirit Magnet',  desc:'+35% pickup range',                            apply:m=>m.magnet*=1.35 },
+  { id:'regen',      icon:'🌿', name:'Island Blessing',desc:'Regenerate +1.2 HP per second',                apply:m=>m.regen+=1.2 },
+  { id:'area',       icon:'🌀', name:'Wide Wrath',     desc:'+15% attack area & projectile size',           apply:m=>m.area*=1.15 },
+  { id:'pierce',     icon:'🎯', name:'Skewer',         desc:'Projectiles pierce +1 extra enemy',            apply:m=>m.pierceBonus+=1 },
+  { id:'velocity',   icon:'💨', name:'Swift Shots',    desc:'+20% projectile speed',                        apply:m=>m.pspd*=1.2 },
+  { id:'longevity',  icon:'⏳', name:'Long Throw',     desc:'+20% projectile lifetime & reach',             apply:m=>m.plife*=1.2 },
+  { id:'overcharge', icon:'🔋', name:'Overcharge',     desc:'Powershots charge 30% faster',                 apply:m=>m.chargeMul*=1.3 },
+  { id:'wisdom',     icon:'📜', name:'Island Wisdom',  desc:'+20% XP from gems',                            apply:m=>m.xpGain*=1.2 },
+  { id:'impact',     icon:'🥊', name:'Heavy Impact',   desc:'+50% knockback on all hits',                   apply:m=>m.knockMul*=1.5 },
+  { id:'secondwind', icon:'🕯️', name:'Second Wind',    desc:'Cheat death once — revive at half HP',         once:true, apply:m=>m.revive+=1 },
 ];

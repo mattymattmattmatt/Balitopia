@@ -28,11 +28,11 @@ when the ground begins to shake... make the Hunger go hungry.
 | Action | Control |
 |---|---|
 | Move | **Left thumb** — touch & drag the left half of the screen (or WASD/arrows on desktop) |
-| Aim | **Right thumb** — touch & drag the right half to steer your fire; let go to auto-aim |
+| Attack | Automatic — every Guardian's power auto-aims at the horde |
+| **Powershot** | When your Guardian's card glows with a ⚡, **tap the right half of the screen** (or Space) — a screen-clearing blast in their signature style |
 | Free a Guardian | Shoot their bamboo cage until it breaks (gold arrow points to the nearest one) |
-| Possess a Guardian | Tap their face card at the bottom of the screen (or ☰ for the full roster) |
-| **Powershot** | When a card glows with a ⚡, possess that Guardian and tap their card again (Space on desktop) — a screen-clearing blast in their signature style |
-| Level up | Collect the gems enemies drop, pick 1 of 3 upgrades |
+| Possess a Guardian | Tap their face card — first 12 line the bottom of the screen, the rest line the top (or ☰ for the full roster) |
+| Level up | Collect gems, then pick one of **three face-down mystery cards** — 15 possible powers, revealed on the flip |
 
 **Guardian mastery:** every Guardian levels up from the damage *they* deal, shown by their
 face-card border: 🟩 Basic → 🟦 Expert → 🟥 Master → 🟧 Saiyan → 🟨 Super Saiyan. Each level
@@ -50,8 +50,10 @@ per-Guardian breakdown), saves to a local **Hall of Records** leaderboard, and f
   green < blue < purple < pink < magma < gold.
 - **Demonder** — rarer, tough, hits hard.
 - **Clubbo** — very rare, very large, very rude.
-- **KING GLOB** — arrives at **8:00**. Kill him to free Balitopia. Free as many Guardians as
-  you can first — you'll need the army.
+- **KING GLOB** — arrives at **8:00**. Kill him and Balitopia is free… for about two minutes.
+  **Endless mode**: every kill starts a new round — the horde toughens, and the Hungry King
+  crawls back out of the mountain bigger and angrier each time. Survive as many rounds as you
+  can; the run ends only when the tide takes you.
 
 ## 🦸 The 24 Guardians
 
