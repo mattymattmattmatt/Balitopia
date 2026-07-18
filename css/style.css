@@ -191,9 +191,9 @@ html, body {
   .threat-card { width:82px; height:60px; }
   #story-panel .big-btn { font-size:14px; padding:8px 24px; }
   .back-btn { font-size:12px; padding:5px 12px; }
-  /* split face-card strips: slightly smaller cards on short screens */
+  /* smaller face cards on short screens so 2 wrapped rows stay compact */
   .facecard { width:40px; height:40px; min-width:40px; }
-  #facecard-strip-top { top:calc(42px + env(safe-area-inset-top)); }
+  #facecard-strip.dense .facecard { width:34px; height:34px; min-width:34px; }
   .upgrade-card.mystery { width:132px; height:150px; }
   .mc-front span { font-size:44px; }
   /* difficulty selector in the compact detail panel */
@@ -400,14 +400,15 @@ html, body {
 }
 #btn-mute.muted { color:#777; }
 
-/* Face cards: first 12 rescued along the bottom, the rest along the top —
-   all 24 visible at once, no scrolling */
-#facecard-strip, #facecard-strip-top {
-  position:absolute; left:50%; transform:translateX(-50%);
-  display:flex; gap:6px; pointer-events:auto; max-width:96vw; padding:4px;
+/* Face cards live along the bottom only, wrapping upward into a 2nd row when
+   the roster grows — the top of the playfield stays clear */
+#facecard-strip {
+  position:absolute; left:50%; bottom:calc(6px + env(safe-area-inset-bottom)); transform:translateX(-50%);
+  display:flex; flex-wrap:wrap-reverse; align-content:flex-end; justify-content:center;
+  gap:5px; pointer-events:auto; width:96vw; max-width:940px; padding:2px;
 }
-#facecard-strip { bottom:calc(6px + env(safe-area-inset-bottom)); }
-#facecard-strip-top { top:calc(46px + env(safe-area-inset-top)); }
+#facecard-strip.dense { gap:4px; }
+#facecard-strip.dense .facecard { width:38px; height:38px; min-width:38px; }
 .facecard {
   width:46px; height:46px; min-width:46px; border-radius:9px; border:2.5px solid rgba(255,255,255,.4);
   background:#0d2229; overflow:hidden; position:relative; cursor:pointer;

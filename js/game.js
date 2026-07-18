@@ -12,7 +12,7 @@ const WORLD = 5200;                 // world is WORLD x WORLD
 const CELL = 88;                    // spatial hash cell
 const MAX_ENEMIES = 300;
 const MAX_PROJ = 400;
-const MAX_GEMS = 320;
+const MAX_GEMS = 500;
 const MAX_PARTS = 260;
 
 // ---------------- Canvas ----------------
@@ -281,15 +281,24 @@ function spawnParts(x, y, color, n, spd) {
     made++;
   }
 }
+const GEM_CAP = 400;   // a single gem never carries more than this much XP
 function dropGem(x, y, val) {
-  let g = null, oldest = null, ot = -1;
+  let free = null, near = null, nd = Infinity;
   for (let i = 0; i < MAX_GEMS; i++) {
-    if (!gems[i].alive) { g = gems[i]; break; }
-    if (gems[i].t > ot) { ot = gems[i].t; oldest = gems[i]; }
+    const gm = gems[i];
+    if (!gm.alive) { free = gm; break; }
+    // track the nearest gem in case the pool is full — merge locally, not into
+    // a stranded far-away gem (that made one "mega-gem" swallow the whole map's
+    // XP and skip ~45 levels at once when finally collected)
+    const d = (gm.x - x) ** 2 + (gm.y - y) ** 2;
+    if (d < nd && gm.val < GEM_CAP) { nd = d; near = gm; }
   }
-  if (!g) { oldest.val += val; return; }  // merge into oldest gem
-  g.alive = true; g.x = x + (Math.random() - 0.5) * 14; g.y = y + (Math.random() - 0.5) * 14;
-  g.val = val; g.t = 0; g.vx = 0; g.vy = 0;
+  if (!free) {
+    if (near) near.val = Math.min(GEM_CAP, near.val + val);   // capped local merge
+    return;
+  }
+  free.alive = true; free.x = x + (Math.random() - 0.5) * 14; free.y = y + (Math.random() - 0.5) * 14;
+  free.val = val; free.t = 0; free.vx = 0; free.vy = 0;
 }
 
 function killEnemy(e) {
@@ -1462,10 +1471,9 @@ function getStripVideo() {
 }
 
 function rebuildStrip() {
-  const bottom = $('facecard-strip'), top = $('facecard-strip-top');
-  bottom.innerHTML = ''; top.innerHTML = '';
+  const strip = $('facecard-strip');
+  strip.innerHTML = '';
   stripCards.clear();
-  let n = 0;
   for (const idx of freedSet) {
     const card = document.createElement('div');
     card.className = 'facecard';
@@ -1484,9 +1492,11 @@ function rebuildStrip() {
       if (idx === player.heroIdx) powershot();   // your own card still works as a powershot button
       else possess(idx);
     });
-    (n++ < 12 ? bottom : top).appendChild(card);   // 12 along the bottom, the rest up top
+    strip.appendChild(card);
     stripCards.set(idx, { card, bar: bar.firstChild });
   }
+  // shrink the cards a touch once the roster grows so 2 rows still fit low
+  strip.classList.toggle('dense', freedSet.size > 14);
   updateStrip();
 }
 
@@ -2076,8 +2086,9 @@ window.__balitopia = {
   freed: () => freedSet,
   heroState: () => heroState,
   telegraphs: () => telegraphs,
+  gems: () => gems,
   joys: { move: joyMove },
-  hurtPlayer,
+  hurtPlayer, dropGem, gainXP,
   possess, breakCage, newGame, spawnEnemy, spawnBoss, powershot, addDamage,
 };
 
