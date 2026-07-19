@@ -105,8 +105,10 @@ let allies = [];               // fighters
 let cages = [];                // { heroIdx, x, y, hp, broken }
 let freedSet = new Set();      // heroIdx freed this run (incl. starter)
 let decor = [];
-let heroState = [];            // per-hero mastery: { dmg, tier, charge }
+let heroState = [];            // per-hero mastery: { dmg, tier, charge, kills, control }
+let heroMods = [];             // per-hero signature-upgrade mods (only that hero's weapon)
 let powerWaves = [];           // queued powershot projectile rings
+const freshHeroMod = () => ({ dmg: 1, rate: 1, area: 1, speed: 1, pierceAdd: 0, countAdd: 0, jumpsAdd: 0, exploadMul: 1 });
 
 function addDamage(src, amt) {
   if (src === undefined || src === null || G.over) return;
@@ -115,13 +117,28 @@ function addDamage(src, amt) {
   hs.dmg += amt;
   while (hs.tier < 4 && hs.dmg >= TIER_DMG[hs.tier + 1]) {
     hs.tier++;
-    banner(`${HEROES[src].name.toUpperCase()} → ${TIER_NAMES[hs.tier]}!`);
-    Sound.sfx.tierup();
-    buzz(30);
     const f = player.heroIdx === src ? player : allies.find(a => a.heroIdx === src);
-    if (f) {
-      spawnParts(f.x, f.y - 20, TIER_COLORS[hs.tier], 18, 170);
-      effects.push({ type: 'tierup', f, color: TIER_COLORS[hs.tier], t: 0, dur: 0.9 });
+    if (hs.tier === 4) {
+      // Super Saiyan: weapon evolution
+      const wtype = HEROES[src].weapons[0].type;
+      banner(`🌟 ${HEROES[src].name.toUpperCase()} IS SUPER SAIYAN — WEAPON EVOLVED!`);
+      banner(`✦ ${HEROES[src].name}'s ${HEROES[src].power.split(' — ')[0]} now ${EVO_NOTE[wtype] || 'transcends'}`);
+      Sound.sfx.powershot();
+      buzz(60);
+      if (f) { effects.push({ type: 'tierup', f, color: '#ffee58', t: 0, dur: 1.3 }); spawnParts(f.x, f.y - 20, '#ffee58', 30, 230); }
+      // first-ever Super Saiyan (any hero) is a milestone
+      try {
+        const save = loadSave();
+        if (!save.firstSS) { save.firstSS = 1; saveGame(save); banner('☀ THE FIRST GUARDIAN TRANSCENDS ☀'); }
+      } catch (e) {}
+    } else {
+      banner(`${HEROES[src].name.toUpperCase()} → ${TIER_NAMES[hs.tier]}!`);
+      Sound.sfx.tierup();
+      buzz(30);
+      if (f) {
+        spawnParts(f.x, f.y - 20, TIER_COLORS[hs.tier], 18, 170);
+        effects.push({ type: 'tierup', f, color: TIER_COLORS[hs.tier], t: 0, dur: 0.9 });
+      }
     }
   }
   if (hs.charge < 1) {
@@ -444,16 +461,29 @@ function spawnProj(o) {
 function fireWeapon(f, w, ws, isAlly, dt) {
   const m = G.mods;
   const src = f.heroIdx;
-  const rateMul = m.rate * (isAlly ? 1.25 : 1);
-  const dmgMul = m.dmg * (isAlly ? 0.55 * m.ally : 1) * heroDmgMul(src);
-  const areaMul = m.area;
+  const hm = heroMods[src] || freshHeroMod();
+  const evo = !!(heroState[src] && heroState[src].tier >= 4);   // Super Saiyan weapon evolution
+  const rateMul = m.rate * (isAlly ? 1.25 : 1) * hm.rate;
+  const dmgMul = m.dmg * (isAlly ? 0.55 * m.ally : 1) * heroDmgMul(src) * hm.dmg * (evo && w.type === 'aura' ? 1.35 : 1);
+  const evoArea = evo && (w.type === 'beam' || w.type === 'aura' || w.type === 'trail') ? 1.4 : 1;
+  const areaMul = m.area * hm.area * evoArea;
+  // effective per-shot params after signature mods + evolution
+  const eCount = (w.count || 1) + hm.countAdd
+    + (evo && w.type === 'nova' ? Math.ceil((w.count || 1) * 0.4) : 0)
+    + (evo && w.type === 'orbit' ? 2 : 0);
+  const ePierce = (w.pierce || 0) + hm.pierceAdd + (evo && w.type === 'shot' ? 2 : 0);
+  const eSpeedMul = hm.speed;
+  const eJumps = (w.jumps || 0) + hm.jumpsAdd + (evo && w.type === 'chain' ? 2 : 0);
+  const eExplodeMul = hm.exploadMul;
+  const eArcAdd = evo && w.type === 'slash' ? 0.5 : 0;
 
   if (w.type === 'orbit') {
     ws.ang += w.rot * dt;
     const R = w.radius * areaMul;
-    for (let i = 0; i < w.count; i++) {
+    while (ws.cds.length < eCount) ws.cds.push(0);   // new orbs from upgrades/evolution
+    for (let i = 0; i < eCount; i++) {
       ws.cds[i] -= dt;
-      const a = ws.ang + i / w.count * 6.283;
+      const a = ws.ang + i / eCount * 6.283;
       const ox = f.x + Math.cos(a) * R, oy = f.y + Math.sin(a) * R;
       if (ws.cds[i] <= 0) {
         let hit = false;
@@ -509,11 +539,11 @@ function fireWeapon(f, w, ws, isAlly, dt) {
     const t = nearestTarget(f.x, f.y, 700, true);
     if (!t) return;                     // hold fire until something's near
     ws.cd = interval;
-    for (let i = 0; i < w.count; i++) {
-      const a = i / w.count * 6.283 + Math.random() * 0.2;
+    for (let i = 0; i < eCount; i++) {
+      const a = i / eCount * 6.283 + Math.random() * 0.2;
       spawnProj({
-        x: f.x, y: f.y, vx: Math.cos(a) * w.speed * m.pspd, vy: Math.sin(a) * w.speed * m.pspd,
-        dmg: w.dmg * dmgMul, pierce: 1 + m.pierceBonus, size: w.size * areaMul, life: w.life * m.plife,
+        x: f.x, y: f.y, vx: Math.cos(a) * w.speed * m.pspd * eSpeedMul, vy: Math.sin(a) * w.speed * m.pspd * eSpeedMul,
+        dmg: w.dmg * dmgMul, pierce: 1 + m.pierceBonus + hm.pierceAdd, size: w.size * areaMul, life: w.life * m.plife,
         color: w.color, knock: (w.knock || 0) * m.knockMul, src,
       });
     }
@@ -541,7 +571,7 @@ function fireWeapon(f, w, ws, isAlly, dt) {
     let cur = target;
     const pts = [{ x: f.x, y: f.y }];
     const visited = new Set();
-    for (let j = 0; j <= w.jumps && cur; j++) {
+    for (let j = 0; j <= eJumps && cur; j++) {
       pts.push({ x: cur.x, y: cur.y });
       damageEnemy(cur, w.dmg * dmgMul * Math.pow(0.85, j), { src });
       if (cur.id !== undefined) visited.add(cur.id);
@@ -586,7 +616,7 @@ function fireWeapon(f, w, ws, isAlly, dt) {
   }
 
   if (w.type === 'slash') {
-    const R = w.radius * areaMul, half = w.arc / 2;
+    const R = w.radius * areaMul, half = (w.arc + eArcAdd) / 2;
     eachEnemyNear(f.x, f.y, R + 40, e => {
       const d2 = (e.x - f.x) ** 2 + (e.y - f.y) ** 2;
       if (d2 > (R + e.r) ** 2) return;
@@ -612,21 +642,21 @@ function fireWeapon(f, w, ws, isAlly, dt) {
         if (Math.abs(da) < half + 0.3) damageCage(c, w.dmg * dmgMul);
       }
     }
-    effects.push({ type: 'slash', x: f.x, y: f.y, ang, r: R, arc: w.arc, t: 0, dur: 0.18, color: w.color });
+    effects.push({ type: 'slash', x: f.x, y: f.y, ang, r: R, arc: w.arc + eArcAdd, t: 0, dur: 0.18, color: w.color });
     if (!isAlly) Sound.sfx.shoot();
     return;
   }
 
   // ----- shot -----
-  for (let i = 0; i < w.count; i++) {
+  for (let i = 0; i < eCount; i++) {
     let a = ang;
-    if (w.count > 1) a += (i - (w.count - 1) / 2) * (w.spread / Math.max(1, w.count - 1)) * 2;
+    if (eCount > 1) a += (i - (eCount - 1) / 2) * (w.spread / Math.max(1, eCount - 1)) * 2 + (w.spread ? 0 : (Math.random() - 0.5) * 0.12);
     else if (w.spread) a += (Math.random() - 0.5) * w.spread;
     spawnProj({
       x: f.x, y: f.y - 12,
-      vx: Math.cos(a) * w.speed * m.pspd, vy: Math.sin(a) * w.speed * m.pspd,
-      dmg: w.dmg * dmgMul, pierce: (w.pierce || 0) + m.pierceBonus, size: w.size * areaMul, life: w.life * m.plife,
-      color: w.color, rainbow: w.rainbow, homing: w.homing, boomerang: w.boomerang, explode: w.explode ? w.explode * areaMul : 0,
+      vx: Math.cos(a) * w.speed * m.pspd * eSpeedMul, vy: Math.sin(a) * w.speed * m.pspd * eSpeedMul,
+      dmg: w.dmg * dmgMul, pierce: ePierce + m.pierceBonus, size: w.size * areaMul, life: w.life * m.plife,
+      color: w.color, rainbow: w.rainbow, homing: w.homing, boomerang: w.boomerang, explode: w.explode ? w.explode * eExplodeMul * areaMul : 0,
       split: w.split, slow: w.slow, poison: w.poison ? w.poison * dmgMul / Math.max(1, w.dmg) * w.dmg : 0,
       poisonT: w.poisonT, knock: (w.knock || 0) * m.knockMul, owner: f, src,
     });
@@ -1614,21 +1644,56 @@ function updatePowerWaves(dt) {
   }
 }
 
+// Build a signature-upgrade card object from HERO_UP data for a given hero.
+function heroUpgradeCard(heroIdx, slot) {
+  const [icon, name, desc, mod] = HERO_UP[HEROES[heroIdx].id][slot];
+  return {
+    id: `hero_${heroIdx}_${slot}`, icon, name: `${HEROES[heroIdx].name}: ${name}`, desc, once: true, hero: heroIdx,
+    apply: () => {
+      const hmod = heroMods[heroIdx];
+      for (const k in mod) {
+        if (k === 'rate') hmod.rate *= mod.rate;
+        else if (k === 'dmg' || k === 'area' || k === 'speed' || k === 'exploadMul') hmod[k] *= mod[k];
+        else hmod[k] += mod[k];   // pierceAdd / countAdd / jumpsAdd
+      }
+    },
+  };
+}
+// Assemble the level-up draw pool: generic upgrades + signature upgrades for any
+// freed Guardian, biased so the Guardian you're piloting shows up more.
+function levelUpPool() {
+  const taken = G.mods.taken;
+  const pool = UPGRADES.filter(u => !(u.once && taken[u.id])).map(u => ({ ...u }));
+  for (const idx of freedSet) {
+    if (!HERO_UP[HEROES[idx].id]) continue;
+    for (let s = 0; s < 2; s++) {
+      const c = heroUpgradeCard(idx, s);
+      if (!taken[c.id]) { if (idx === player.heroIdx) pool.push(c, c); else pool.push(c); }  // double-weight your hero
+    }
+  }
+  return pool;
+}
 // ---------------- Level up: 3 face-down mystery cards ----------------
 function showLevelUp() {
   G.running = false;
   const row = $('upgrade-row');
   row.innerHTML = '';
-  const pool = UPGRADES.filter(u => !(u.once && G.mods.taken[u.id]));
-  let picked = false;
-  for (let i = 0; i < 3 && pool.length; i++) {
+  const pool = levelUpPool();
+  const chosen = [], seen = new Set();
+  while (chosen.length < 3 && pool.length) {
     const pick = pool.splice((Math.random() * pool.length) | 0, 1)[0];
+    if (seen.has(pick.id)) continue;   // don't offer the same card twice (double-weighting can dup)
+    seen.add(pick.id); chosen.push(pick);
+  }
+  let picked = false;
+  for (const pick of chosen) {
     const card = document.createElement('div');
-    card.className = 'upgrade-card mystery';
+    card.className = 'upgrade-card mystery' + (pick.hero !== undefined ? ' signature' : '');
     card.innerHTML =
       `<div class="mc-inner">
          <div class="mc-face mc-front"><span>?</span></div>
          <div class="mc-face mc-back">
+           ${pick.hero !== undefined ? '<div class="mc-sig">SIGNATURE</div>' : ''}
            <div class="uc-icon">${pick.icon}</div><h3>${pick.name}</h3><p>${pick.desc}</p>
          </div>
        </div>`;
@@ -1692,6 +1757,7 @@ function newGame(heroIdx, diffIdx) {
   G.startHero = heroIdx;
   G.round = 1; G.bossKills = 0; G.nextBossAt = BOSS_TIME;
   heroState = HEROES.map(() => ({ dmg: 0, tier: 0, charge: 0, kills: 0, control: 0 }));
+  heroMods = HEROES.map(freshHeroMod);
   powerWaves = [];
   G.mods = {
     dmg: 1, rate: 1, spd: 1, hpBonus: 0, ally: 1, magnet: 1, regen: 0, area: 1,
@@ -2189,7 +2255,38 @@ function showDetail(i) {
   $('hero-detail-name').textContent = `${h.name} — ${h.title}`;
   $('hero-detail-power').textContent = h.power;
   $('hero-detail-desc').textContent = h.desc;
+  // stat bars (HP / SPEED / POWER), normalized across the roster
+  const R = heroStatRanges();
+  const nrm = (v, lo, hi) => Math.round(Math.max(8, Math.min(100, (v - lo) / (hi - lo) * 92 + 8)));
+  const bars = [
+    ['HP', nrm(h.hp, R.hp[0], R.hp[1]), '#ef5350'],
+    ['SPEED', nrm(h.spd, R.spd[0], R.spd[1]), '#4dd0e1'],
+    ['POWER', nrm(heroPower(h), R.pow[0], R.pow[1]), '#ffd54f'],
+  ];
+  let stats = document.getElementById('hero-detail-stats');
+  if (!stats) { stats = document.createElement('div'); stats.id = 'hero-detail-stats'; $('hero-detail-text').appendChild(stats); }
+  stats.innerHTML = bars.map(([lbl, w, c]) =>
+    `<div class="hstat"><span>${lbl}</span><div class="hstat-bar"><i style="width:${w}%;background:${c}"></i></div></div>`).join('');
   $('hero-detail').classList.remove('hidden');
+}
+// rough sustained-DPS estimate so heroes can be compared at a glance
+function heroPower(h) {
+  let p = 0;
+  for (const w of h.weapons) {
+    const c = w.count || 1, iv = w.interval || 0.3;
+    if (w.type === 'orbit') p += w.dmg * c * 3;
+    else if (w.type === 'aura' || w.type === 'beam' || w.type === 'trail') p += w.dmg / iv * 1.4;
+    else if (w.type === 'chain') p += w.dmg * ((w.jumps || 1) + 1) / iv;
+    else p += w.dmg * c / iv;   // shot / nova / slash
+  }
+  return p;
+}
+let _statRanges = null;
+function heroStatRanges() {
+  if (_statRanges) return _statRanges;
+  const hp = HEROES.map(h => h.hp), spd = HEROES.map(h => h.spd), pow = HEROES.map(heroPower);
+  _statRanges = { hp: [Math.min(...hp), Math.max(...hp)], spd: [Math.min(...spd), Math.max(...spd)], pow: [Math.min(...pow), Math.max(...pow)] };
+  return _statRanges;
 }
 
 // ---------------- Wire up ----------------
@@ -2246,8 +2343,9 @@ window.__balitopia = {
   heroState: () => heroState,
   telegraphs: () => telegraphs,
   gems: () => gems,
+  heroMods: () => heroMods,
   joys: { move: joyMove },
-  hurtPlayer, dropGem, gainXP,
+  hurtPlayer, dropGem, gainXP, levelUpPool, showLevelUp,
   possess, breakCage, newGame, spawnEnemy, spawnBoss, powershot, addDamage,
 };
 

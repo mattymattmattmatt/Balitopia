@@ -186,3 +186,45 @@ const UPGRADES = [
   { id:'impact',     icon:'🥊', name:'Heavy Impact',   desc:'+50% knockback on all hits',                   apply:m=>m.knockMul*=1.5 },
   { id:'secondwind', icon:'🕯️', name:'Second Wind',    desc:'Cheat death once — revive at half HP',         once:true, apply:m=>m.revive+=1 },
 ];
+
+// ---------- Hero signature upgrades ----------
+// Two per Guardian, each modifying only THAT hero's weapon (via per-hero mods).
+// They appear in the level-up mystery pool once that Guardian is in play, and
+// are one-time (leave the pool after being taken). Mods: dmg/rate/area/speed
+// are multipliers; pierceAdd/countAdd/jumpsAdd are additive; exploadMul scales
+// explosion radius. rate<1 = faster.
+const HERO_UP = {
+  bo:            [ ['🌈','Prism Fan','Two extra rainbow feathers',{countAdd:2}], ['🎯','Piercing Prism','Feathers pierce +2 enemies',{pierceAdd:2}] ],
+  chocker:       [ ['☠️','Choking Cloud','+45% poison damage & area',{dmg:1.45,area:1.25}], ['💨','Wider Fumes','+35% reach & size',{area:1.35,speed:1.15}] ],
+  chomper:       [ ['🦈','Wider Jaws','+35% bite arc & reach',{area:1.35}], ['⚡','Double Bite','Chomps 40% faster',{rate:0.6}] ],
+  chunky:        [ ['🍌','Barrel Roll','+2 projectiles per throw',{countAdd:2}], ['🙌','Faster Hands','Throws 25% faster',{rate:0.75}] ],
+  cliggy:        [ ['🥚','Colossal Yolk','+40% blast size & +25% damage',{area:1.4,dmg:1.25}], ['🍳','Double Clutch','Lays a second egg',{countAdd:1}] ],
+  creeper:       [ ['👁️','Wide Stare','+45% beam width',{area:1.45}], ['🔴','Focused Stare','+45% beam damage',{dmg:1.45}] ],
+  diver:         [ ['🗡️','Skewer Volley','Pierces +3 more enemies',{pierceAdd:3}], ['💨','Terminal Velocity','+30% speed & +20% damage',{speed:1.3,dmg:1.2}] ],
+  fertle:        [ ['💥','Bigger Booms','+50% blast radius',{exploadMul:1.5,area:1.15}], ['🔥','Twin Shells','Fires a second shell',{countAdd:1}] ],
+  fixie:         [ ['❄️','Icicle Storm','+2 icicles per volley',{countAdd:2}], ['🧊','Deep Freeze','+35% damage',{dmg:1.35}] ],
+  flick:         [ ['🔥','Inferno Wake','+40% trail damage',{dmg:1.4}], ['🌋','Wider Blaze','+40% trail & shot area',{area:1.4}] ],
+  fygar:         [ ['🗡️','Fang Barrage','+2 fangs per throw',{countAdd:2}], ['⚡','Blur Strike','Throws 30% faster',{rate:0.7}] ],
+  gus:           [ ['🌀','Wider Coils','+40% crush radius',{area:1.4}], ['🐍','Crushing Grip','+50% crush damage',{dmg:1.5}] ],
+  'peeta-heater':[ ['♨️','Steam Barrage','+1 jet & +2 pierce',{countAdd:1,pierceAdd:2}], ['🔥','Scalding','+40% damage',{dmg:1.4}] ],
+  'roger-dodger':[ ['🪃','Twin Wings','Throws a second blade',{countAdd:1}], ['✨','Razor Wings','+45% damage',{dmg:1.45}] ],
+  sixter:        [ ['⭐','Shrapnel Cloud','+6 shards per burst',{countAdd:6}], ['💢','Sharper Stars','+35% damage',{dmg:1.35}] ],
+  skyjumper:     [ ['🌟','Stolen Constellation','+1 orbiting star',{countAdd:1}], ['💫','Wider Orbit','+30% orbit radius & size',{area:1.3}] ],
+  snapper:       [ ['🦀','Thunderclap','+4 shockwave bolts',{countAdd:4}], ['💥','Harder Clap','+40% damage',{dmg:1.4}] ],
+  stinger:       [ ['🔱','Longer Lance','+40% sweep reach',{area:1.4}], ['⚡','Rapid Drill','Sweeps 35% faster',{rate:0.65}] ],
+  swack:         [ ['🌊','Twin Doorwave','Throws a second wave',{countAdd:1}], ['🏄','Tidal Wall','+40% wave size',{area:1.4}] ],
+  waterwolf:     [ ['🌊','Full Tide','+4 tide slabs',{countAdd:4}], ['🐺','Heavier Tides','+40% damage',{dmg:1.4}] ],
+  whipper:       [ ['🦇','Echo Swarm','+2 homing shrieks',{countAdd:2}], ['🔊','Piercing Echo','+40% damage',{dmg:1.4}] ],
+  yellogen:      [ ['🔊','Double Screech','+1 bolt per screech',{countAdd:1}], ['💥','Shatterpoint','+40% damage',{dmg:1.4}] ],
+  yelp:          [ ['🔵','Fourth Orb','+1 orbiting orb',{countAdd:1}], ['📢','Bigger Orbs','+40% orb size & reach',{area:1.4}] ],
+  zappo:         [ ['⚡','Chain Reaction','Arc jumps to +2 more enemies',{jumpsAdd:2}], ['🌩️','Overvolt','+40% damage',{dmg:1.4}] ],
+};
+
+// Weapon evolution at Super Saiyan (tier 4): a permanent transform, applied by
+// archetype in fireWeapon so it's one rule per weapon type, not per hero.
+const EVO_NOTE = {
+  shot:  'pierces more & fires an echo shot', nova: '+40% projectiles',
+  orbit: '+2 orbiting bodies', aura: '+35% radius & damage',
+  chain: '+2 chain jumps', beam: '+40% width', trail: 'bigger, longer-lasting patches',
+  slash: 'wider, longer arc',
+};
