@@ -47,14 +47,35 @@ and +30% damage per round, and Glob returns every 2:30 with +60% HP, arriving pr
 Each kill banks 8,000 score (×difficulty); the run ends only at death, and any run with at
 least one Glob kill counts as a win (crowns ×N on the leaderboard).
 
+### 7. Daily Challenge (shipped)
+A date-seeded run from the title menu — fixed Guardian, difficulty, region and cage rotation,
+identical for everyone that day, with its own dated best-score board in Records.
+
+### 8. Shell Shrine — meta-currency & permanent perks (shipped)
+Every run banks **shells** (1 per 500 score). Spend them in the **🐚 Shell Shrine** on stacking
+starting perks: **Sturdy Shell** (+HP), **Sharpened Kin** (+damage), **Fleet Footed** (+speed),
+**Old Wisdom** (+XP), **Gem Sense** (+pickup range), **Head Start** (pre-broken cages), and
+**Fortune** (+level-up rerolls). Perks never apply to daily runs, keeping that board fair.
+
+### 9. Achievements (shipped)
+Ten unlockables tracked across runs — Regicide, Jailbreak (free all 24), Transcendent (a Super
+Saiyan), endless-round milestones, Lone Guardian (Glob solo), Island Saviour (Cataclysm), Full
+Codex, and lifetime kill/damage marks. Newly earned ones flash on the stats screen and fill a
+grid in Records.
+
+### 10. Biome runs + deeper hero builds (shipped)
+Runs play out on **jungle / sea / sky** biomes with their own ground and music. Each Guardian
+now brings **two signature upgrades** into the level-up pool once freed, weapons **evolve** at
+Super Saiyan, and three new enemy archetypes (spitter, runner, warden) plus a two-phase boss
+(enrage → final frenzy) keep the horde reading fresh deep into a run.
+
+### 11. Reroll / Skip + shareable recap (shipped)
+The level-up screen has **Reroll** (limited, extendable via Fortune) and **Skip for +15% HP**.
+Every game-over screen can export a **1080×1080 run-recap poster** via the native share sheet
+(PNG-download fallback) — a built-in "beat my score" hook.
+
 ## Parked ideas (say the word and I'll build them)
-- **Daily seeded run** — same map/cages/spawns for everyone that day; a dated high-score board.
-- **Meta-currency + permanent upgrades** — earn shells per run, spend on small starting perks
-  (roguelite meta-progression — the strongest long-term hook, but the biggest build).
 - **Run modifiers / mutators** — opt-in challenges (glass cannon, no possession, double horde)
   for bonus score multipliers.
-- **Achievements** — "free all 24 in one run", "beat Cataclysm solo", "no damage to the boss".
-- **Weekly rotating boss modifiers** or a second boss.
-- **Biome runs** — the land/sea/sky region music already hints at distinct themed maps.
-
-If you want online/global leaderboards (not just local), that needs a tiny backend — I can spec one.
+- **Weekly rotating boss modifiers** or a second, distinct boss.
+- **Online/global leaderboards** (not just local) — needs a tiny backend; I can spec one.

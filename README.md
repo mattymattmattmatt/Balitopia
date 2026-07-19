@@ -32,7 +32,8 @@ when the ground begins to shake... make the Hunger go hungry.
 | **Powershot** | When your Guardian's card glows with a ⚡, **tap the right half of the screen** (or Space) — a screen-clearing blast in their signature style |
 | Free a Guardian | Shoot their bamboo cage until it breaks (gold arrow points to the nearest one) |
 | Possess a Guardian | Tap their face card — first 12 line the bottom of the screen, the rest line the top (or ☰ for the full roster) |
-| Level up | Collect gems, then pick one of **three face-down mystery cards** — 15 possible powers, revealed on the flip |
+| Level up | Collect gems, then pick one of **three face-down mystery cards** — 15 generic powers plus each freed Guardian's two **signature upgrades**, revealed on the flip. Don't like the hand? **Reroll** it (3 per run, more from the shop) or **Skip** for +15% HP |
+| Minimap | A live corner map shows cages (gold), King Glob (red), your allies and you — toggle it in Settings |
 
 **Guardian mastery:** every Guardian levels up from the damage *they* deal, shown by their
 face-card border: 🟩 Basic → 🟦 Expert → 🟥 Master → 🟧 Saiyan → 🟨 Super Saiyan. Each level
@@ -43,11 +44,25 @@ busiest fighters become your biggest bombs.
 Nightmare → Cataclysm** — each scales the horde, the boss, and your **score multiplier**; clear
 one to unlock the next. Every run ends on a detailed stats screen (score, all-time rank, and a
 per-Guardian breakdown), saves to a local **Hall of Records** leaderboard, and fills in the
-**Guardian Codex** (your best mastery tier for each of the 24, across all runs). See
-**[REPLAYABILITY.md](REPLAYABILITY.md)** for the full design and what's planned next.
+**Guardian Codex** (your best mastery tier for each of the 24, across all runs). Tap **📸 SHARE**
+to export a poster of your run for friends. See **[REPLAYABILITY.md](REPLAYABILITY.md)** for the
+full design and what's planned next.
+
+**Beyond a single run:** the title menu also holds a **☀ Daily Challenge** (a date-seeded run —
+fixed Guardian, difficulty, region and cage layout, the same for everyone that day), a
+**🐚 Shell Shrine** where shells earned from every run buy permanent meta-perks (starting HP,
+damage, move speed, XP, magnet, a head-start cage, and extra level-up rerolls), and **🏆 Achievements**
+that unlock across runs. Every run also plays out on one of three **biomes** — jungle, sea or
+sky — each with its own ground and battle music.
+
+**⚙ Settings** cover music/SFX volume, vibration, reduced motion, colorblind danger pips,
+UI text size, the minimap toggle, and save export/import/erase.
 
 - **Minyar** — endless, easy to squish, but they come in every size and color. Color = danger:
   green < blue < purple < pink < magma < gold.
+- **Spitter** — hangs back and lobs poison globs; a glowing muzzle marks the threat.
+- **Runner** — fast, fragile, flees when wounded, and pops in a toxic burst on death.
+- **Warden** — front-armored bruiser; its shield arc soaks damage, so flank it.
 - **Demonder** — rarer, tough, hits hard.
 - **Clubbo** — very rare, very large, very rude.
 - **KING GLOB** — arrives at **8:00**. Kill him and Balitopia is free… for about two minutes.
