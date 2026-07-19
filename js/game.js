@@ -88,7 +88,7 @@ function moveVector() {
   return [mx, my];
 }
 
-const buzz = ms => { try { navigator.vibrate && navigator.vibrate(ms); } catch (e) {} };
+const buzz = ms => { if (prefs.haptics) try { navigator.vibrate && navigator.vibrate(ms); } catch (e) {} };
 
 // ---------------- Game state ----------------
 const G = {
@@ -1073,8 +1073,9 @@ function render(dt) {
   ctx.fillRect(0, 0, cw, ch);
   if (!player) return;
 
-  const shx = G.shake ? (Math.random() - 0.5) * G.shake : 0;
-  const shy = G.shake ? (Math.random() - 0.5) * G.shake : 0;
+  const shakeMul = prefs.motion ? 1 : 0.25;   // reduced-motion softens (not kills) shake
+  const shx = G.shake ? (Math.random() - 0.5) * G.shake * shakeMul : 0;
+  const shy = G.shake ? (Math.random() - 0.5) * G.shake * shakeMul : 0;
   const camX = G.cam.x - viewW / 2 + shx, camY = G.cam.y - VIEW_H / 2 + shy;
   ctx.setTransform(dpr * viewScale, 0, 0, dpr * viewScale, -camX * dpr * viewScale, -camY * dpr * viewScale);
 
@@ -1173,6 +1174,14 @@ function render(dt) {
     if (e.type !== 'minyar' && e.hp < e.maxhp) {
       ctx.fillStyle = 'rgba(0,0,0,.5)'; ctx.fillRect(e.x - 20, e.y - h - 4, 40, 5);
       ctx.fillStyle = '#ef5350'; ctx.fillRect(e.x - 19, e.y - h - 3, 38 * Math.max(0, e.hp / e.maxhp), 3);
+    }
+    // colorblind danger pips: redundant non-color cue for power tier (0 pips = safest)
+    if (prefs.colorblind && e.tier > 0) {
+      const py = e.y - h * squash + 2, px = e.x - (e.tier - 1) * 3;
+      for (let k = 0; k < e.tier; k++) {
+        ctx.fillStyle = '#000'; ctx.fillRect(px + k * 6 - 1, py - 1, 5, 5);
+        ctx.fillStyle = '#fff'; ctx.fillRect(px + k * 6, py, 3, 3);
+      }
     }
   }
 
@@ -1741,7 +1750,7 @@ function newGame(heroIdx, diffIdx) {
   try {
     const save = loadSave();
     save.lastHero = heroIdx;
-    localStorage.setItem('balitopia', JSON.stringify(save));
+    saveGame(save);
   } catch (e) {}
   Sound.stopPreview();
   G.region = ['region-land', 'region-sea', 'region-sky'][(Math.random() * 3) | 0];
@@ -1754,7 +1763,7 @@ function newGame(heroIdx, diffIdx) {
     const save = loadSave();
     if (!save.seenHints) {
       save.seenHints = 1;
-      localStorage.setItem('balitopia', JSON.stringify(save));
+      saveGame(save);
       banner('◀ DRAG LEFT SIDE TO MOVE · TAP RIGHT SIDE FOR POWERSHOT ⚡');
       banner('⛓ FOLLOW THE GOLD ARROW TO A CAGE — FREE YOUR KIN');
     }
@@ -1805,7 +1814,7 @@ function saveRun(score) {
     save.bestKills = Math.max(save.bestKills || 0, G.kills);
     save.wins = (save.wins || 0) + (G.victory ? 1 : 0);
     save.lastHero = G.startHero; save.lastDiff = G.diff.id;
-    localStorage.setItem('balitopia', JSON.stringify(save));
+    saveGame(save);
   } catch (e) {}
   return rank;
 }
@@ -1925,9 +1934,142 @@ function buildRecordsScreen() {
 function openRecords() { Sound.sfx.uiClick(); buildRecordsScreen(); $('screen-records').classList.remove('hidden'); }
 function closeRecords() { Sound.sfx.uiBack(); $('screen-records').classList.add('hidden'); }
 
+// ---------------- Settings ----------------
+function bindSettings() {
+  const sync = () => {
+    $('set-music').value = prefs.musicVol; $('set-music-v').textContent = prefs.musicVol + '%';
+    $('set-sfx').value = prefs.sfxVol; $('set-sfx-v').textContent = prefs.sfxVol + '%';
+    $('set-haptics').checked = !!prefs.haptics;
+    $('set-motion').checked = !prefs.motion;         // checkbox = "reduced motion ON"
+    $('set-colorblind').checked = !!prefs.colorblind;
+    $('set-uiscale').value = prefs.uiscale; $('set-uiscale-v').textContent = prefs.uiscale + '%';
+  };
+  $('set-music').addEventListener('input', e => { prefs.musicVol = +e.target.value; $('set-music-v').textContent = prefs.musicVol + '%'; savePrefs(); });
+  $('set-sfx').addEventListener('input', e => { prefs.sfxVol = +e.target.value; $('set-sfx-v').textContent = prefs.sfxVol + '%'; savePrefs(); });
+  $('set-sfx').addEventListener('change', () => Sound.sfx.uiSelect());
+  $('set-haptics').addEventListener('change', e => { prefs.haptics = e.target.checked ? 1 : 0; savePrefs(); if (prefs.haptics) buzz(20); });
+  $('set-motion').addEventListener('change', e => { prefs.motion = e.target.checked ? 0 : 1; savePrefs(); });
+  $('set-colorblind').addEventListener('change', e => { prefs.colorblind = e.target.checked ? 1 : 0; savePrefs(); });
+  $('set-uiscale').addEventListener('input', e => { prefs.uiscale = +e.target.value; $('set-uiscale-v').textContent = prefs.uiscale + '%'; savePrefs(); });
+  $('btn-export-save').addEventListener('click', exportSave);
+  $('btn-import-save').addEventListener('click', importSave);
+  $('btn-wipe-save').addEventListener('click', wipeSave);
+  window.__syncSettings = sync;
+}
+function openSettings(fromScreen) {
+  Sound.sfx.uiClick();
+  window.__settingsFrom = fromScreen || 'screen-title';
+  window.__syncSettings && window.__syncSettings();
+  $('screen-settings').classList.remove('hidden');
+}
+function closeSettings() {
+  Sound.sfx.uiBack();
+  $('screen-settings').classList.add('hidden');
+}
+function exportSave() {
+  const data = localStorage.getItem('balitopia') || '{}';
+  try {
+    navigator.clipboard.writeText(data);
+    banner ? null : null;
+  } catch (e) {}
+  const blob = new Blob([data], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob); a.download = 'balitopia-save.json';
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+}
+function importSave() {
+  const inp = document.createElement('input');
+  inp.type = 'file'; inp.accept = 'application/json,.json';
+  inp.onchange = () => {
+    const f = inp.files && inp.files[0];
+    if (!f) return;
+    const r = new FileReader();
+    r.onload = () => {
+      try {
+        const parsed = JSON.parse(r.result);
+        if (parsed && typeof parsed === 'object') {
+          localStorage.setItem('balitopia', JSON.stringify(parsed));
+          loadPrefs(); window.__syncSettings && window.__syncSettings();
+          alert('Save imported. Restart the app to see all progress.');
+        }
+      } catch (e) { alert('That file was not a valid Balitopia save.'); }
+    };
+    r.readAsText(f);
+  };
+  inp.click();
+}
+function wipeSave() {
+  if (!confirm('Erase ALL Balitopia progress — records, mastery, and settings? This cannot be undone.')) return;
+  localStorage.removeItem('balitopia');
+  prefs = { ...PREF_DEFAULTS }; applyPrefs();
+  window.__syncSettings && window.__syncSettings();
+  location.reload();
+}
+
+// ---------------- How to play ----------------
+function buildHowto() {
+  $('howto-body').innerHTML = `
+    <h3>CONTROLS</h3>
+    <div class="ht-row"><span class="ht-key">Move</span><span>Drag anywhere on the <b>left half</b> of the screen (or WASD / arrow keys)</span></div>
+    <div class="ht-row"><span class="ht-key">Attack</span><span>Automatic — every Guardian auto-aims at the nearest threat</span></div>
+    <div class="ht-row"><span class="ht-key">Powershot ⚡</span><span>Tap the <b>right half</b> of the screen (or Space) when your card glows — a screen-clearing signature blast</span></div>
+    <div class="ht-row"><span class="ht-key">Possess</span><span>Tap any freed Guardian's face card along the bottom to become them</span></div>
+    <div class="ht-row"><span class="ht-key">Pause</span><span>Tap ☰ (or Esc / P) to open the roster and pause</span></div>
+    <h3>THE ISLAND</h3>
+    <div class="ht-row"><span class="ht-ico">⛓</span><span><b>Free the Guardians.</b> The other 23 are locked in cursed cages. Shoot a cage until it breaks — that Guardian fights beside you, and you can possess them. The <b>gold arrow</b> points to the nearest cage.</span></div>
+    <div class="ht-row"><span class="ht-ico">🎨</span><span><b>Colour = danger.</b> Enemies come in six power tiers, shown by hue: green → blue → purple → pink → orange → gold. (Turn on <em>Colorblind danger pips</em> in Settings for a shape cue.)</span></div>
+    <div class="ht-row"><span class="ht-ico">👑</span><span><b>King Glob</b> arrives at 8:00 — the red arrow tracks him. Beat him and endless rounds begin, each tougher than the last.</span></div>
+    <h3>GROWING STRONGER</h3>
+    <div class="ht-row"><span class="ht-ico">★</span><span><b>Level up</b> by collecting gems, then flip one of three mystery cards for a run-long upgrade.</span></div>
+    <div class="ht-row"><span class="ht-ico">🟩</span><span><b>Mastery.</b> Each Guardian levels from the damage <em>they</em> deal — their card border climbs green → blue → red → orange → gold (Super Saiyan), and their weapon <b>evolves</b> at the top.</span></div>
+  `;
+}
+function openHowto() { Sound.sfx.uiClick(); buildHowto(); $('screen-howto').classList.remove('hidden'); }
+function closeHowto() { Sound.sfx.uiBack(); $('screen-howto').classList.add('hidden'); }
+
+// ---------------- Save data (versioned) ----------------
+const SAVE_VERSION = 2;
+function loadSave() {
+  let s;
+  try { s = JSON.parse(localStorage.getItem('balitopia') || '{}'); } catch (e) { s = {}; }
+  if (!s || typeof s !== 'object') s = {};
+  // migrate older saves forward instead of silently misreading fields
+  if (!s.v) {                                  // v1 (unversioned) → v2
+    s.records = Array.isArray(s.records) ? s.records : [];
+    s.mastery = s.mastery && typeof s.mastery === 'object' ? s.mastery : {};
+    s.v = SAVE_VERSION;
+  }
+  return s;
+}
+function saveGame(s) {
+  s.v = SAVE_VERSION;
+  try { localStorage.setItem('balitopia', JSON.stringify(s)); } catch (e) {}
+}
+
+// ---------------- Preferences ----------------
+const PREF_DEFAULTS = { musicVol: 80, sfxVol: 100, haptics: 1, motion: 1, colorblind: 0, uiscale: 100 };
+let prefs = { ...PREF_DEFAULTS };
+function loadPrefs() {
+  const save = loadSave();
+  prefs = { ...PREF_DEFAULTS, ...(save.prefs || {}) };
+  applyPrefs();
+}
+function applyPrefs() {
+  Sound.setMusicVol(prefs.musicVol / 100);
+  Sound.setSfxVol(prefs.sfxVol / 100);
+  document.body.classList.toggle('reduce-motion', !prefs.motion);
+  document.documentElement.style.setProperty('--ui-scale', prefs.uiscale / 100);
+}
+function savePrefs() {
+  const save = loadSave();
+  save.prefs = prefs;
+  saveGame(save);
+  applyPrefs();
+}
+
 // ---------------- Menus ----------------
 let selectedHero = 0;
-const loadSave = () => { try { return JSON.parse(localStorage.getItem('balitopia') || '{}'); } catch (e) { return {}; } };
 
 function enterApp() {
   Sound.ensure();   // the caller (goStory / goSelect) owns music from here
@@ -2002,6 +2144,11 @@ function buildTitle() {
   $('btn-records-back').addEventListener('click', closeRecords);
   $('btn-over-records').addEventListener('click', openRecords);
   $('btn-over-menu').addEventListener('click', () => { Sound.sfx.uiBack(); goTitle(); });
+  $('btn-menu-settings').addEventListener('click', () => { Sound.ensure(); openSettings('screen-title'); });
+  $('btn-settings-back').addEventListener('click', closeSettings);
+  $('btn-menu-howto').addEventListener('click', () => { Sound.ensure(); openHowto(); });
+  $('btn-howto-back').addEventListener('click', closeHowto);
+  bindSettings();
 }
 
 function buildSelect() {
@@ -2058,13 +2205,21 @@ function wire() {
     else closeRoster();
   });
   $('btn-roster-close').addEventListener('click', closeRoster);
+  $('btn-roster-settings').addEventListener('click', () => openSettings('screen-roster'));
+  $('btn-roster-forfeit').addEventListener('click', () => {
+    if (confirm('End this run now? Your score so far will be recorded.')) {
+      Sound.sfx.uiBack();
+      $('screen-roster').classList.add('hidden');
+      endGame();
+    }
+  });
   $('btn-mute').addEventListener('click', () => {
     const m = Sound.toggleMute();
     $('btn-mute').classList.toggle('muted', m);
     try {
       const save = loadSave();
       save.muted = m;
-      localStorage.setItem('balitopia', JSON.stringify(save));
+      saveGame(save);
     } catch (e) {}
   });
   document.addEventListener('visibilitychange', () => {
@@ -2076,6 +2231,7 @@ function wire() {
 Sprites.init().then(() => {
   buildTitle();
   wire();
+  loadPrefs();
   requestAnimationFrame(frame);
   document.body.dataset.ready = '1';
 });

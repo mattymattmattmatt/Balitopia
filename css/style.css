@@ -56,7 +56,31 @@ html, body {
   transition:transform .1s, box-shadow .15s;
 }
 .menu-btn:active { transform:scale(.95); box-shadow:0 0 30px rgba(255,213,79,.7), inset 0 0 18px rgba(125,255,212,.3); }
+#title-sub-btns { display:flex; gap:8px; margin-top:4px; }
+.menu-btn.small { width:auto; margin:4px 0; padding:6px 14px; font-size:clamp(9px,2vh,12px); letter-spacing:2px; text-indent:2px; }
 #title-hint { margin-bottom:max(1.6vh, env(safe-area-inset-bottom)); text-shadow:0 1px 3px #000; }
+
+/* ---- Settings & How-To screens ---- */
+#screen-settings, #screen-howto { justify-content:flex-start; z-index:31; background:linear-gradient(160deg,#0a0a14,#05040b 70%); }
+#settings-body { width:min(560px,92vw); display:flex; flex-direction:column; gap:9px; margin-top:4px; overflow-y:auto; max-height:78vh; padding:4px 6px 16px; }
+.set-row { display:flex; align-items:center; gap:12px; font-size:clamp(12px,2.6vh,15px); color:#e4d9ec;
+  background:rgba(255,255,255,.05); border:1px solid rgba(128,203,196,.22); border-radius:11px; padding:9px 14px; }
+.set-row > span { flex:1 1 auto; }
+.set-row input[type=range] { flex:0 0 44%; accent-color:#ffd54f; height:22px; }
+.set-row b { min-width:38px; text-align:right; color:#ffd54f; font-size:12px; }
+.set-row.toggle input { width:22px; height:22px; accent-color:#ffd54f; }
+.set-danger { display:flex; gap:8px; flex-wrap:wrap; justify-content:center; margin-top:8px; }
+.menu-btn2.danger { color:#ff8a80; border-color:rgba(255,90,90,.55); }
+#roster-btns { display:flex; gap:10px; align-items:center; justify-content:center; flex-wrap:wrap; margin-top:8px; }
+#howto-body { width:min(680px,94vw); overflow-y:auto; max-height:80vh; padding:6px 10px 20px; font-size:clamp(12px,2.5vh,15px); line-height:1.5; color:#e4d9ec; }
+#howto-body h3 { color:#ffd54f; font-size:clamp(13px,2.8vh,16px); letter-spacing:2px; margin:12px 0 5px; border-bottom:1px solid rgba(255,213,79,.25); padding-bottom:3px; }
+#howto-body .ht-row { display:flex; gap:10px; align-items:baseline; margin:5px 0; }
+#howto-body .ht-key { flex:0 0 34%; color:#80cbc4; font-weight:bold; }
+#howto-body .ht-ico { font-size:18px; }
+@media (max-height:520px) and (orientation:landscape) {
+  #settings-body { max-height:74vh; } .set-row { padding:6px 12px; }
+  #howto-body { max-height:76vh; }
+}
 
 /* ---- Story screen ---- */
 #screen-story {
@@ -184,6 +208,7 @@ html, body {
   #hero-detail-power { margin-bottom:1px; }
   #hero-detail .big-btn { font-size:14px; padding:8px 20px; letter-spacing:1px; }
   #screen-roster .big-btn { font-size:13px; padding:7px 22px; margin-top:4px; }
+  #roster-btns .menu-btn2 { font-size:11px; padding:7px 14px; }
   /* story panel: keep it tight so nothing clips on a short phone */
   #story-panel { max-height:96vh; padding:8px 18px; }
   #story-title { font-size:16px; }
@@ -472,3 +497,14 @@ html, body {
   .facecard.ready, .facecard .fc-zap, .newbest { animation:none; }
   .facecard.ready { box-shadow:0 0 10px 3px var(--glow, #ffd54f); }
 }
+/* manual reduced-motion toggle (Settings) — mirrors the OS media query */
+body.reduce-motion .facecard.ready, body.reduce-motion .facecard .fc-zap,
+body.reduce-motion .newbest, body.reduce-motion #boss-eta, body.reduce-motion .mc-front span,
+body.reduce-motion #banner { animation:none !important; }
+body.reduce-motion .facecard.ready { box-shadow:0 0 10px 3px var(--glow, #ffd54f); }
+body.reduce-motion #banner { transform:translateX(-50%) scale(1); opacity:1; }
+
+/* UI text scale (Settings) — nudges the HUD/banner readability */
+:root { --ui-scale:1; }
+#hp-text, #lvl-text, #timer, #kills, #freed, #boss-eta { font-size:calc(1em * var(--ui-scale)); }
+#banner { font-size:calc(clamp(16px,4.5vh,28px) * var(--ui-scale)); }

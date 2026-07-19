@@ -6,14 +6,15 @@
 const Sound = (() => {
   let ctx = null, master = null, musicGain = null, sfxGain = null;
   let muted = false, musicTimer = null, step = 0;
+  let musicVol = 0.8, sfxVol = 1.0, musicBase = 0.55;   // 0..1 user volumes
 
   function ensure() {
     if (ctx) { if (ctx.state === 'suspended') ctx.resume(); return true; }
     try {
       ctx = new (window.AudioContext || window.webkitAudioContext)();
       master = ctx.createGain(); master.gain.value = 0.85; master.connect(ctx.destination);
-      sfxGain = ctx.createGain(); sfxGain.gain.value = 0.7; sfxGain.connect(master);
-      musicGain = ctx.createGain(); musicGain.gain.value = 0.28; musicGain.connect(master);
+      sfxGain = ctx.createGain(); sfxGain.gain.value = 0.7 * sfxVol; sfxGain.connect(master);
+      musicGain = ctx.createGain(); musicGain.gain.value = 0.28 * musicVol; musicGain.connect(master);
       return true;
     } catch (e) { return false; }
   }
@@ -181,9 +182,10 @@ const Sound = (() => {
     const { loop = true, vol = 0.55 } = opts || {};
     stopMusic();
     musicPath = path;
+    musicBase = vol;
     const el = new Audio('assets/audio/' + path);
     el.loop = loop;
-    el.volume = vol;
+    el.volume = vol * musicVol;
     el.muted = muted;
     el.play().catch(() => { if (loop) startMusic(); });   // synth fallback (e.g. file:// runs)
     el.onerror = () => { if (loop && musicEl === el) startMusic(); };
@@ -196,10 +198,10 @@ const Sound = (() => {
   }
 
   function playFile(path, vol) {
-    if (muted) return;
+    if (muted || sfxVol <= 0) return;
     let a = fileCache[path];
     if (!a) { a = new Audio(path); fileCache[path] = a; }
-    a.volume = vol === undefined ? 0.9 : vol;
+    a.volume = (vol === undefined ? 0.9 : vol) * sfxVol;
     try { a.currentTime = 0; } catch (e) {}
     a.play().catch(() => {});
   }
@@ -208,7 +210,7 @@ const Sound = (() => {
   function preview(path) {
     stopPreview();
     previewEl = new Audio(path);
-    previewEl.volume = 0.6;
+    previewEl.volume = 0.6 * musicVol;
     previewEl.muted = muted;
     previewEl.play().catch(() => {});
   }
@@ -224,6 +226,17 @@ const Sound = (() => {
     return muted;
   }
   function toggleMute() { return setMuted(!muted); }
+  function setMusicVol(v) {
+    musicVol = Math.max(0, Math.min(1, v));
+    if (musicEl) musicEl.volume = musicBase * musicVol;
+    if (musicGain) musicGain.gain.value = 0.28 * musicVol;
+  }
+  function setSfxVol(v) {
+    sfxVol = Math.max(0, Math.min(1, v));
+    if (sfxGain) sfxGain.gain.value = 0.7 * sfxVol;
+  }
 
-  return { ensure, sfx: S, startMusic, stopMusic, playMusic, playFile, preview, stopPreview, toggleMute, setMuted, get muted() { return muted; } };
+  return { ensure, sfx: S, startMusic, stopMusic, playMusic, playFile, preview, stopPreview,
+    toggleMute, setMuted, setMusicVol, setSfxVol,
+    get muted() { return muted; }, get musicVol() { return musicVol; }, get sfxVol() { return sfxVol; } };
 })();
