@@ -44,16 +44,21 @@ const Sprites = (() => {
   });
 
   // ---------------- Hero portraits (face cards) ----------------
-  function portrait(i, size) {
-    return mk(size, size, (x, w, h) => {
+  // The rendered pixels are cached per (hero,size); each call still returns its
+  // OWN canvas (a DOM node can only live in one place) but just blits the cache
+  // instead of re-doing the cover-fit / gradient / text every time. Opening the
+  // roster or codex (24 portraits) is now a batch of cheap blits.
+  const portraitCache = {};
+  function portraitSrc(i, size) {
+    const key = i + ':' + size;
+    if (portraitCache[key]) return portraitCache[key];
+    return portraitCache[key] = mk(size, size, (x, w, h) => {
       const hero = HEROES[i], img = imgs.portraits[i];
       if (img) {
-        // cover-fit the 88x88 webp face card
         const s = Math.max(w / img.width, h / img.height);
         x.drawImage(img, (w - img.width * s) / 2, (h - img.height * s) / 2, img.width * s, img.height * s);
         return;
       }
-      // fallback: accent tile with initial
       const g = x.createLinearGradient(0, 0, 0, h);
       g.addColorStop(0, shade(hero.accent, 0.75));
       g.addColorStop(1, '#0d2229');
@@ -63,6 +68,10 @@ const Sprites = (() => {
       x.textAlign = 'center'; x.textBaseline = 'middle';
       x.fillText(hero.name[0], w / 2, h * 0.55);
     });
+  }
+  function portrait(i, size) {
+    const src = portraitSrc(i, size);
+    return mk(size, size, x => x.drawImage(src, 0, 0));
   }
 
   // ---------------- Hero bodies (world sprites) ----------------
@@ -288,20 +297,27 @@ const Sprites = (() => {
   }
 
   // ---------------- Ground & decor ----------------
-  function groundTile() {
+  // three biome palettes so the land / sea / sky region music has a matching look
+  const BIOMES = {
+    land: { base: '#2f6b3d', patch: '20,60,32', sand: '194,178,128', tuft: '140,200,110', flowers: ['#f8bbd0', '#fff59d', '#e1bee7'] },
+    sea:  { base: '#1f6b70', patch: '12,60,66',  sand: '224,204,150', tuft: '90,210,210',  flowers: ['#ffe0b2', '#b2ebf2', '#fff59d'] },
+    sky:  { base: '#5a5a8f', patch: '40,40,80',   sand: '210,210,255', tuft: '190,180,255', flowers: ['#ffffff', '#e1bee7', '#b3e5fc'] },
+  };
+  function groundTile(region) {
+    const p = BIOMES[region] || BIOMES.land;
     return mk(256, 256, (x, w, h) => {
-      x.fillStyle = '#2f6b3d'; x.fillRect(0, 0, w, h);
+      x.fillStyle = p.base; x.fillRect(0, 0, w, h);
       let seed = 7;
       const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
       for (let i = 0; i < 26; i++) {
-        x.fillStyle = `rgba(20,60,32,${0.12 + rnd() * 0.12})`;
+        x.fillStyle = `rgba(${p.patch},${0.12 + rnd() * 0.12})`;
         x.beginPath(); x.ellipse(rnd() * w, rnd() * h, 14 + rnd() * 30, 10 + rnd() * 22, rnd() * 3, 0, 7); x.fill();
       }
       for (let i = 0; i < 6; i++) {
-        x.fillStyle = 'rgba(194,178,128,.10)';
+        x.fillStyle = `rgba(${p.sand},.10)`;
         x.beginPath(); x.ellipse(rnd() * w, rnd() * h, 18 + rnd() * 26, 12 + rnd() * 18, rnd() * 3, 0, 7); x.fill();
       }
-      x.strokeStyle = 'rgba(140,200,110,.5)'; x.lineWidth = 1.6; x.lineCap = 'round';
+      x.strokeStyle = `rgba(${p.tuft},.5)`; x.lineWidth = 1.6; x.lineCap = 'round';
       for (let i = 0; i < 46; i++) {
         const gx = rnd() * w, gy = rnd() * h;
         for (let b = -1; b <= 1; b++) {
@@ -309,7 +325,7 @@ const Sprites = (() => {
         }
       }
       for (let i = 0; i < 10; i++) {
-        x.fillStyle = ['#f8bbd0', '#fff59d', '#e1bee7'][i % 3];
+        x.fillStyle = p.flowers[i % 3];
         x.beginPath(); x.arc(rnd() * w, rnd() * h, 2, 0, 7); x.fill();
       }
     });
@@ -394,7 +410,10 @@ const Sprites = (() => {
     get('gemM', () => gem('#40c4ff', 16));
     get('gemL', () => gem('#ffd740', 20));
     get('heart', heart);
-    get('ground', groundTile);
+    get('ground_land', () => groundTile('land'));
+    get('ground_sea', () => groundTile('sea'));
+    get('ground_sky', () => groundTile('sky'));
+    get('ground', () => groundTile('land'));   // legacy alias
     get('palm', palm);
     get('rock', rock);
     get('bush', bush);

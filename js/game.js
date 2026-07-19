@@ -878,7 +878,7 @@ function spawnBoss() {
     x: Math.min(WORLD - 200, Math.max(200, player.x + Math.cos(a) * 640)),
     y: Math.min(WORLD - 200, Math.max(200, player.y + Math.sin(a) * 640)),
     hp, maxhp: hp, r: BOSS.r, spd: BOSS.spd, dmg: BOSS.dmg * diff.edmg * roundDmgMul(),
-    slowT: 0, flash: 0, wob: 0, enraged: round > 1,   // returning Glob starts angry
+    slowT: 0, flash: 0, wob: 0, enraged: round > 1, frenzy: false,   // returning Glob starts angry
     volleyCd: 4, summonCd: 8, slamCd: 12,
   };
   if (G.boss.enraged) G.boss.spd *= 1.3;
@@ -894,50 +894,59 @@ function updateBoss(dt) {
   const b = G.boss;
   if (!b || !b.alive) return;
   b.flash -= dt; b.slowT -= dt; b.wob += dt;
-  if (!b.enraged && b.hp < b.maxhp / 2) {
-    b.enraged = true;
-    b.spd *= 1.3;
+  const round = G.round || 1;
+  const edmg = G.diff ? G.diff.edmg : 1;
+  // phase 2 (enrage) at 50%, phase 3 (frenzy) at 20%
+  if (!b.enraged && b.hp < b.maxhp * 0.5) {
+    b.enraged = true; b.spd *= 1.3;
     Sound.playFile('assets/audio/enemies/glob_enrage.wav', 0.95);
-    banner('KING GLOB IS FURIOUS!');
-    G.shake = Math.max(G.shake, 10);
+    banner('KING GLOB IS FURIOUS!'); G.shake = Math.max(G.shake, 10);
+  }
+  if (!b.frenzy && b.hp < b.maxhp * 0.2) {
+    b.frenzy = true; b.spd *= 1.2;
+    Sound.playFile('assets/audio/enemies/glob_enrage.wav', 1);
+    banner('👑 KING GLOB — FINAL FRENZY 👑'); G.shake = Math.max(G.shake, 14);
   }
   const dx = player.x - b.x, dy = player.y - b.y;
   const d = Math.hypot(dx, dy) || 1;
-  const sp = b.spd * (b.slowT > 0 ? 0.6 : 1);
+  // in frenzy he stops chasing and zones from range, forcing you to reposition
+  const chase = b.frenzy ? 0.35 : 1;
+  const sp = b.spd * (b.slowT > 0 ? 0.6 : 1) * chase;
   b.x += dx / d * sp * dt; b.y += dy / d * sp * dt;
 
   if (d < b.r + 16) hurtPlayer(b.dmg);
 
   b.volleyCd -= dt;
   if (b.volleyCd <= 0) {
-    b.volleyCd = (b.enraged ? 3.2 : 5) + Math.random() * 2;
+    b.volleyCd = (b.frenzy ? 2 : b.enraged ? 3.2 : 5) + Math.random() * 2;
     const base = Math.atan2(dy, dx);
-    for (let i = 0; i < 10; i++) {
-      const a = base + (i - 4.5) * 0.14;
-      for (let k = 0; k < ebullets.length; k++) {
-        const eb = ebullets[k];
-        if (eb.alive) continue;
-        eb.alive = true; eb.x = b.x; eb.y = b.y - 40;
-        eb.vx = Math.cos(a) * 240; eb.vy = Math.sin(a) * 240;
-        eb.dmg = 22; eb.size = 10; eb.life = 3.2; eb.t = 0;
-        break;
-      }
+    const spread = b.frenzy ? 14 : 10;
+    for (let i = 0; i < spread; i++) {
+      const a = base + (i - (spread - 1) / 2) * 0.14;
+      spawnEBullet(b.x, b.y - 40, Math.cos(a) * 240, Math.sin(a) * 240, 22 * edmg, 10, 3.2);
     }
+    // round 3+: a second radial ring; round 5+: a spiral burst
+    if (round >= 3) for (let i = 0; i < 12; i++) { const a = b.wob + i / 12 * 6.283; spawnEBullet(b.x, b.y - 40, Math.cos(a) * 170, Math.sin(a) * 170, 18 * edmg, 8, 3.6); }
     Sound.sfx.nova();
   }
   b.summonCd -= dt;
   if (b.summonCd <= 0) {
-    b.summonCd = 9;
-    for (let i = 0; i < 7; i++) {
+    b.summonCd = b.frenzy ? 6 : 9;
+    const kinds = round >= 4 ? ['minyar', 'spitter', 'runner'] : ['minyar'];
+    for (let i = 0; i < (b.frenzy ? 9 : 7); i++) {
       const a = Math.random() * 6.283;
-      spawnEnemy('minyar', Math.min(5, 2 + (Math.random() * 4 | 0)), b.x + Math.cos(a) * 110, b.y + Math.sin(a) * 110);
+      spawnEnemy(kinds[(Math.random() * kinds.length) | 0], Math.min(5, 2 + (Math.random() * 4 | 0)), b.x + Math.cos(a) * 110, b.y + Math.sin(a) * 110);
     }
   }
   b.slamCd -= dt;
-  if (b.slamCd <= 0 && d < 420) {
-    // ground-target the PLAYER's position — a readable, dodgeable AoE
-    b.slamCd = b.enraged ? 8 : 11;
-    telegraphs.push({ x: player.x, y: player.y, r: 165, t: 0, dur: 1.1, dmg: 38 * (G.diff ? G.diff.edmg : 1) });
+  if (b.slamCd <= 0 && (d < 420 || b.frenzy)) {
+    b.slamCd = b.frenzy ? 5 : b.enraged ? 8 : 11;
+    // frenzy: two slams — one on you, one predicting where you're headed
+    telegraphs.push({ x: player.x, y: player.y, r: 165, t: 0, dur: 1.1, dmg: 38 * edmg });
+    if (b.frenzy) {
+      const [mvx, mvy] = moveVector();
+      telegraphs.push({ x: player.x + mvx * 180, y: player.y + mvy * 180, r: 150, t: 0, dur: 1.2, dmg: 38 * edmg });
+    }
     Sound.playFile('assets/audio/sfx/glob_slam.wav', 0.85);
   }
 }
@@ -1169,7 +1178,7 @@ function render(dt) {
   ctx.setTransform(dpr * viewScale, 0, 0, dpr * viewScale, -camX * dpr * viewScale, -camY * dpr * viewScale);
 
   // ---- ground ----
-  const tile = Sprites.get('ground');
+  const tile = Sprites.get('ground_' + (G.region ? G.region.split('-')[1] : 'land'));
   const ts = 256;
   const x0 = Math.floor(camX / ts) * ts, y0 = Math.floor(camY / ts) * ts;
   for (let tx = x0; tx < camX + viewW; tx += ts)
@@ -1646,6 +1655,7 @@ function possess(idx) {
   if (G.over || idx === player.heroIdx || !freedSet.has(idx)) return;
   const ai = allies.findIndex(a => a.heroIdx === idx);
   if (ai < 0) return;
+  G.possessedOther = true;   // for the 'Lone Guardian' achievement
   const al = allies[ai];
   const hpFrac = player.hp / maxHP();
   // souls swap bodies: control moves to the ally's body, old body keeps fighting
@@ -1828,15 +1838,42 @@ function closeRoster() {
   if (!G.over && $('screen-levelup').classList.contains('hidden')) G.running = true;
 }
 
+// ---------------- Daily challenge ----------------
+// A date-seeded run with a fixed hero / difficulty / region / cage layout, so
+// everyone plays the same setup each day and races a shared-format leaderboard.
+function mulberry32(seed) {
+  return function () {
+    seed |= 0; seed = seed + 0x6D2B79F5 | 0;
+    let t = Math.imul(seed ^ seed >>> 15, 1 | seed);
+    t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+    return ((t ^ t >>> 14) >>> 0) / 4294967296;
+  };
+}
+const dayKey = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
+function dailyRng() { const k = dayKey(); let s = 0; for (let i = 0; i < k.length; i++) s = (s * 31 + k.charCodeAt(i)) | 0; return mulberry32(s); }
+function dailySetup() {
+  const r = dailyRng();
+  return { hero: (r() * HEROES.length) | 0, diff: (r() * 3) | 0, region: ['region-land', 'region-sea', 'region-sky'][(r() * 3) | 0], cageRot: r() * 6.283 };
+}
+function startDaily() {
+  enterApp(); Sound.sfx.uiClick();
+  const s = dailySetup();
+  selectedHero = s.hero; selectedDiff = s.diff;
+  MENU_SCREENS.forEach(id => $(id).classList.add('hidden'));
+  newGame(s.hero, s.diff, s);
+}
+
 // ---------------- Game flow ----------------
-function newGame(heroIdx, diffIdx) {
+function newGame(heroIdx, diffIdx, daily) {
   G.running = true; G.over = false; G.victory = false; G.pendingLv = 0;
   G.time = 0; G.kills = 0; G.level = 1; G.xp = 0; G.xpNext = 10;
   G.spawnAcc = 0; G.boss = null; G.bossWarned = false; G.shake = 0;
   G.seen = {};
   G.flash = 0; G.hurtFlash = 0; G.powerHintShown = false;
+  G.daily = daily || null;
   G.diff = DIFFICULTIES[Math.max(0, Math.min(DIFFICULTIES.length - 1, diffIdx | 0))];
   G.startHero = heroIdx;
+  G.possessedOther = false;
   G.round = 1; G.bossKills = 0; G.nextBossAt = BOSS_TIME;
   heroState = HEROES.map(() => ({ dmg: 0, tier: 0, charge: 0, kills: 0, control: 0 }));
   heroMods = HEROES.map(freshHeroMod);
@@ -1846,6 +1883,10 @@ function newGame(heroIdx, diffIdx) {
     pierceBonus: 0, pspd: 1, plife: 1, chargeMul: 1, xpGain: 1, knockMul: 1, revive: 0,
     taken: {},   // `once` upgrades leave the pool after this
   };
+  // permanent Shell Shrine perks (daily challenge ignores them for fairness)
+  const perks = daily ? {} : (loadSave().perks || {});
+  for (const p of PERKS) { const lv = perks[p.id] || 0; if (lv > 0) p.apply(G.mods, lv); }
+  G.headStart = daily ? 0 : (perks.start || 0);
 
   for (const e of enemies) e.alive = false;
   for (const p of projs) p.alive = false;
@@ -1860,12 +1901,14 @@ function newGame(heroIdx, diffIdx) {
   player.hp = maxHP(); player.iv = 1.5;
   G.cam.x = player.x; G.cam.y = player.y;
 
-  // cages: golden spiral around spawn
+  // cages: golden spiral around spawn (daily uses a fixed rotation so the
+  // layout is identical for everyone that day)
+  const cageRot = daily ? daily.cageRot : Math.random() * 6.283;
   cages = [];
   let ci = 0;
   for (let i = 0; i < HEROES.length; i++) {
     if (i === heroIdx) continue;
-    const a = ci * 2.39996 + Math.random() * 0.3;
+    const a = cageRot + ci * 2.39996;
     const d = 460 + ci * 82;
     cages.push({
       heroIdx: i, isCage: true,
@@ -1893,6 +1936,12 @@ function newGame(heroIdx, diffIdx) {
   $('screen-select').classList.add('hidden');
   $('screen-over').classList.add('hidden');
   $('hud').classList.remove('hidden');
+  // Head Start perk: free the nearest N cages immediately
+  for (let n = 0; n < (G.headStart || 0) && cages.length; n++) {
+    const c = cages.filter(c => !c.broken).sort((a, b) =>
+      ((a.x - player.x) ** 2 + (a.y - player.y) ** 2) - ((b.x - player.x) ** 2 + (b.y - player.y) ** 2))[0];
+    if (c) { c.broken = true; allies.push(makeFighter(c.heroIdx, player.x, player.y)); freedSet.add(c.heroIdx); }
+  }
   updateHudCounts();
   rebuildStrip();
   try {
@@ -1901,7 +1950,7 @@ function newGame(heroIdx, diffIdx) {
     saveGame(save);
   } catch (e) {}
   Sound.stopPreview();
-  G.region = ['region-land', 'region-sea', 'region-sky'][(Math.random() * 3) | 0];
+  G.region = daily ? daily.region : ['region-land', 'region-sea', 'region-sky'][(Math.random() * 3) | 0];
   Sound.playMusic(`music/${G.region}.mp3`);
   Sound.playFile(`assets/audio/heroes/${HEROES[heroIdx].id}_entrance.wav`, 0.9);
   bannerQ.length = 0;
@@ -1961,10 +2010,44 @@ function saveRun(score) {
     save.bestScore = Math.max(save.bestScore || 0, score);
     save.bestKills = Math.max(save.bestKills || 0, G.kills);
     save.wins = (save.wins || 0) + (G.victory ? 1 : 0);
-    save.lastHero = G.startHero; save.lastDiff = G.diff.id;
+    if (!G.daily) { save.lastHero = G.startHero; save.lastDiff = G.diff.id; }
+    // daily challenge best (keyed by date)
+    if (G.daily) {
+      const dk = dayKey();
+      save.daily = save.daily || {};
+      save.daily[dk] = Math.max(save.daily[dk] || 0, score);
+      // keep only the last ~10 days
+      const keys = Object.keys(save.daily).sort();
+      while (keys.length > 10) delete save.daily[keys.shift()];
+    }
+    // shells (meta currency)
+    G.shellsEarned = Math.floor(score / SHELLS_PER_SCORE);
+    save.shells = (save.shells || 0) + G.shellsEarned;
+    // lifetime stats
+    const st = save.stats || (save.stats = { kills: 0, dmg: 0 });
+    st.kills += G.kills;
+    st.dmg += heroState.reduce((s, hs) => s + hs.dmg, 0);
+    // achievements
+    G.newAch = checkAchievements(save);
     saveGame(save);
   } catch (e) {}
   return rank;
+}
+
+function checkAchievements(save) {
+  const ach = save.ach || (save.ach = {});
+  const codexComplete = HEROES.every(h => (save.mastery[h.id] || 0) >= 4);
+  const ctx = {
+    bossKills: G.bossKills, freed: freedSet.size, round: G.round, diff: G.diff.id,
+    maxTier: heroState.reduce((m, hs) => Math.max(m, hs.tier), 0),
+    possessed: G.possessedOther, codexComplete,
+    lifeKills: save.stats.kills, lifeDmg: save.stats.dmg,
+  };
+  const unlocked = [];
+  for (const a of ACHIEVEMENTS) {
+    if (!ach[a.id] && a.test(ctx)) { ach[a.id] = Date.now(); unlocked.push(a); }
+  }
+  return unlocked;
 }
 
 function buildStatsScreen(rank) {
@@ -1973,14 +2056,19 @@ function buildStatsScreen(rank) {
     G.bossKills > 1 ? `GLOB SLAIN ×${G.bossKills}!` : won ? 'BALITOPIA IS FREE!' : 'THE TIDE TAKES YOU';
   $('over-title').style.color = won ? '#ffd54f' : '#ef9a9a';
   $('over-diff').innerHTML =
+    (G.daily ? `<span class="diff-badge" style="color:#ffd54f;border-color:#ffd54f">☀ DAILY</span>` : '') +
     `<span class="diff-badge" style="color:${diff.color};border-color:${diff.color}">◆ ${diff.name}</span>` +
     (G.round > 1 ? `<span class="diff-badge" style="color:#b388ff;border-color:#b388ff">🌀 ROUND ${G.round}</span>` : '');
-  $('over-flavor').textContent = won
+  const flav = won
     ? (G.bossKills > 1 ? 'The Hungry King kept coming back. You kept ending him.' : 'King Glob is unmade — the Balance holds.')
     : 'The horde was too many. This time.';
+  const newAch = (G.newAch && G.newAch.length)
+    ? `<div class="ach-unlocked">${G.newAch.map(a => `<span>🏆 ${a.icon} ${a.name}</span>`).join('')}</div>` : '';
+  $('over-flavor').innerHTML = flav + newAch;
   $('over-score').innerHTML =
     `<div class="score-num">${G.score.toLocaleString()}</div>
-     <div class="score-lbl">SCORE${rank >= 0 ? ` · #${rank + 1} ALL-TIME` : ''}${rank === 0 ? ' <span class="newbest">NEW BEST!</span>' : ''}</div>`;
+     <div class="score-lbl">SCORE${rank >= 0 ? ` · #${rank + 1} ALL-TIME` : ''}${rank === 0 ? ' <span class="newbest">NEW BEST!</span>' : ''}</div>
+     ${G.shellsEarned ? `<div class="shells-earned">🐚 +${G.shellsEarned} shells</div>` : ''}`;
   const t = G.time | 0;
   $('over-summary').innerHTML = [
     ['⏱', fmtTime(t), 'survived'],
@@ -2043,7 +2131,16 @@ function buildRecordsScreen() {
   const records = Array.isArray(save.records) ? save.records : [];
   const mastery = save.mastery || {};
   const medal = ['🥇', '🥈', '🥉'];
-  let html = '<div class="rec-block"><div class="rec-h">BEST RUNS</div>';
+  // today's daily challenge summary
+  const s = dailySetup();
+  const dBest = (save.daily && save.daily[dayKey()]) || 0;
+  const dd = DIFFICULTIES[s.diff];
+  let html = `<div class="rec-block"><div class="rec-h">☀ TODAY'S DAILY</div>
+    <div class="daily-card">
+      <div>Guardian: <b>${HEROES[s.hero].name}</b> · <span style="color:${dd.color}">${dd.name}</span> · ${s.region.split('-')[1]}</div>
+      <div>Your best today: <b>${dBest ? dBest.toLocaleString() : '—'}</b></div>
+    </div></div>`;
+  html += '<div class="rec-block"><div class="rec-h">BEST RUNS</div>';
   if (!records.length) html += '<div class="rec-empty">No runs yet — go make history.</div>';
   else {
     html += '<div class="rec-list">';
@@ -2061,6 +2158,15 @@ function buildRecordsScreen() {
     html += '</div>';
   }
   html += '</div>';
+  // achievements
+  const ach = save.ach || {};
+  const gotN = ACHIEVEMENTS.filter(a => ach[a.id]).length;
+  html += `<div class="rec-block"><div class="rec-h">ACHIEVEMENTS <span class="rec-sub">${gotN}/${ACHIEVEMENTS.length}</span></div><div class="ach-grid">`;
+  for (const a of ACHIEVEMENTS) {
+    const got = !!ach[a.id];
+    html += `<div class="ach-cell${got ? ' got' : ''}"><div class="ach-ic">${got ? a.icon : '🔒'}</div><div class="ach-tx"><b>${a.name}</b><span>${a.desc}</span></div></div>`;
+  }
+  html += '</div></div>';
   const done = HEROES.filter(h => (mastery[h.id] || 0) >= 4).length;
   html += `<div class="rec-block"><div class="rec-h">GUARDIAN CODEX <span class="rec-sub">${done}/24 mastered</span></div><div id="codex-grid"></div></div>`;
   $('records-body').innerHTML = html;
@@ -2081,6 +2187,40 @@ function buildRecordsScreen() {
 }
 function openRecords() { Sound.sfx.uiClick(); buildRecordsScreen(); $('screen-records').classList.remove('hidden'); }
 function closeRecords() { Sound.sfx.uiBack(); $('screen-records').classList.add('hidden'); }
+
+// ---------------- Shell Shrine (meta shop) ----------------
+function buildShop() {
+  const save = loadSave();
+  const shells = save.shells || 0;
+  const perks = save.perks || {};
+  $('shop-shell-count').textContent = shells.toLocaleString();
+  const body = $('shop-body');
+  body.innerHTML = '';
+  for (const p of PERKS) {
+    const lv = perks[p.id] || 0;
+    const maxed = lv >= p.max;
+    const cost = maxed ? 0 : p.cost(lv);
+    const row = document.createElement('div');
+    row.className = 'shop-row' + (maxed ? ' maxed' : '');
+    row.innerHTML =
+      `<div class="shop-ic">${p.icon}</div>
+       <div class="shop-mid"><b>${p.name}</b><span>${p.desc}</span>
+         <div class="shop-dots">${Array.from({ length: p.max }, (_, i) => `<i class="${i < lv ? 'on' : ''}"></i>`).join('')}</div></div>
+       <button class="shop-buy" ${maxed || shells < cost ? 'disabled' : ''}>${maxed ? 'MAX' : '🐚 ' + cost}</button>`;
+    if (!maxed) row.querySelector('.shop-buy').addEventListener('click', () => {
+      const s = loadSave();
+      if ((s.shells || 0) < cost) return;
+      s.shells -= cost;
+      s.perks = s.perks || {}; s.perks[p.id] = (s.perks[p.id] || 0) + 1;
+      saveGame(s);
+      Sound.sfx.uiClick(); buzz(20);
+      buildShop();
+    });
+    body.appendChild(row);
+  }
+}
+function openShop() { Sound.ensure(); Sound.sfx.uiClick(); buildShop(); $('screen-shop').classList.remove('hidden'); }
+function closeShop() { Sound.sfx.uiBack(); $('screen-shop').classList.add('hidden'); }
 
 // ---------------- Settings ----------------
 function bindSettings() {
@@ -2286,6 +2426,9 @@ function buildTitle() {
   $('btn-menu-start').addEventListener('click', () => { enterApp(); Sound.sfx.uiClick(); goStory(); });
   $('btn-menu-continue').addEventListener('click', () => { enterApp(); Sound.sfx.uiClick(); goSelect(); });
   $('btn-menu-records').addEventListener('click', () => { enterApp(); openRecords(); });
+  $('btn-menu-daily').addEventListener('click', startDaily);
+  $('btn-menu-shop').addEventListener('click', openShop);
+  $('btn-shop-back').addEventListener('click', closeShop);
   $('btn-story-continue').addEventListener('click', () => { Sound.sfx.uiClick(); goSelect(); });
   $('btn-story-back').addEventListener('click', () => { Sound.sfx.uiBack(); goTitle(); });
   $('btn-select-back').addEventListener('click', () => { Sound.sfx.uiBack(); goStory(); });
@@ -2377,7 +2520,7 @@ function wire() {
   $('btn-retry').addEventListener('click', () => {
     Sound.sfx.uiClick();
     $('screen-over').classList.add('hidden');
-    goSelect();
+    if (G.daily) startDaily(); else goSelect();   // replay the same daily
   });
   $('btn-roster').addEventListener('click', () => {
     if ($('screen-roster').classList.contains('hidden')) openRoster();

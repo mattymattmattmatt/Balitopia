@@ -192,6 +192,35 @@ const UPGRADES = [
   { id:'secondwind', icon:'🕯️', name:'Second Wind',    desc:'Cheat death once — revive at half HP',         once:true, apply:m=>m.revive+=1 },
 ];
 
+// ---------- Meta-progression: the Shell Shrine ----------
+// Earn Shells from runs, spend on modest PERMANENT boons. Kept deliberately
+// small so the difficulty ladder still matters — these smooth the early game,
+// they don't trivialize it. apply() folds into G.mods at run start.
+const PERKS = [
+  { id:'hp',    icon:'❤️', name:'Sturdy Shell',  desc:'+8 starting max HP',        max:5, cost:l=>40 + l * 30,  apply:(m,l)=>m.hpBonus += 8 * l },
+  { id:'dmg',   icon:'💥', name:'Sharpened Kin', desc:'+4% damage',                max:5, cost:l=>50 + l * 40,  apply:(m,l)=>m.dmg *= 1 + 0.04 * l },
+  { id:'spd',   icon:'👟', name:'Fleet Footed',  desc:'+3% move speed',            max:3, cost:l=>45 + l * 35,  apply:(m,l)=>m.spd *= 1 + 0.03 * l },
+  { id:'xp',    icon:'📜', name:'Old Wisdom',     desc:'+6% XP gained',            max:3, cost:l=>45 + l * 35,  apply:(m,l)=>m.xpGain *= 1 + 0.06 * l },
+  { id:'magnet',icon:'🧲', name:'Gem Sense',      desc:'+12% pickup range',        max:3, cost:l=>35 + l * 25,  apply:(m,l)=>m.magnet *= 1 + 0.12 * l },
+  { id:'start', icon:'⛓', name:'Head Start',     desc:'Begin with 1 cage already broken', max:3, cost:l=>80 + l * 70, apply:()=>{} },
+];
+const SHELLS_PER_SCORE = 500;   // 1 shell per this much score
+
+// ---------- Achievements ----------
+// Checked at run end against a run context + lifetime save stats.
+const ACHIEVEMENTS = [
+  { id:'firstwin',  icon:'👑', name:'Regicide',        desc:'Defeat King Glob',                  test:c=>c.bossKills>=1 },
+  { id:'freeall',   icon:'⛓',  name:'Jailbreak',       desc:'Free all 24 Guardians in one run',  test:c=>c.freed>=24 },
+  { id:'ss',        icon:'🌟', name:'Transcendent',    desc:'Take a Guardian to Super Saiyan',   test:c=>c.maxTier>=4 },
+  { id:'endless5',  icon:'🌀', name:'Still Standing',  desc:'Reach endless round 5',             test:c=>c.round>=5 },
+  { id:'endless10', icon:'🔥', name:'Unrelenting',     desc:'Reach endless round 10',            test:c=>c.round>=10 },
+  { id:'solo',      icon:'🦸', name:'Lone Guardian',   desc:'Beat King Glob without possessing anyone', test:c=>c.bossKills>=1&&!c.possessed },
+  { id:'cataclysm', icon:'☄️', name:'Island Saviour',  desc:'Defeat King Glob on Cataclysm',     test:c=>c.bossKills>=1&&c.diff>=3 },
+  { id:'codex',     icon:'📖', name:'Full Codex',      desc:'Master all 24 Guardians to Super Saiyan', test:c=>c.codexComplete },
+  { id:'reaper',    icon:'☠️', name:'Reaper',          desc:'Slay 10,000 enemies (lifetime)',    test:c=>c.lifeKills>=10000 },
+  { id:'million',   icon:'💥', name:'Megaton',         desc:'Deal 1,000,000 damage (lifetime)',  test:c=>c.lifeDmg>=1000000 },
+];
+
 // ---------- Hero signature upgrades ----------
 // Two per Guardian, each modifying only THAT hero's weapon (via per-hero mods).
 // They appear in the level-up mystery pool once that Guardian is in play, and
