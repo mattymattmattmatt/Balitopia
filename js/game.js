@@ -224,29 +224,42 @@ function nearestCage(x, y, maxD) {
 }
 
 // ---------------- Spawning ----------------
+// Endless scaling that CONVERGES instead of exploding: each round adds less than
+// the last, plateauing near a cap (hp ~4x, dmg ~3x, boss ~5x) so round 20 is a
+// real fight, not a spreadsheet wall.
+function conv(perStep, decay, round) {
+  return 1 + perStep * (1 - Math.pow(decay, Math.max(0, round - 1))) / (1 - decay);
+}
+const roundHpMul   = () => conv(ROUND_EHP, 0.85, G.round || 1);
+const roundDmgMul  = () => conv(ROUND_EDMG, 0.85, G.round || 1);
+const roundBossMul = () => conv(ROUND_BHP, 0.85, G.round || 1);
+
 function spawnEnemy(type, tier, x, y) {
   let e = null;
   for (let i = 0; i < MAX_ENEMIES; i++) if (!enemies[i].alive) { e = enemies[i]; e.id = i; break; }
   if (!e) return null;
   const def = ENEMIES[type];
-  const scale = type === 'minyar' ? 0.72 + Math.random() * 0.85 : 0.85 + Math.random() * 0.5;
+  const base = def.base || type;   // sprite family (new archetypes reuse art)
+  const small = base === 'minyar';
+  const scale = small ? 0.72 + Math.random() * 0.85 : 0.85 + Math.random() * 0.5;
   const timeMult = 1 + (G.time / 60) * 0.18;
   const tm = TIERS[tier].mult;
   const diff = G.diff || DIFFICULTIES[0];
-  const roundHp = 1 + ROUND_EHP * ((G.round || 1) - 1);     // endless escalation
-  const roundDmg = 1 + ROUND_EDMG * ((G.round || 1) - 1);
-  e.alive = true; e.type = type; e.tier = tier; e.scale = scale;
+  e.alive = true; e.type = type; e.base = base; e.ai = def.ai || 'chase'; e.tier = tier; e.scale = scale;
   e.x = x; e.y = y;
-  e.maxhp = def.hp * tm * Math.pow(scale, 1.7) * timeMult * diff.ehp * roundHp;
+  e.maxhp = def.hp * tm * Math.pow(scale, 1.7) * timeMult * diff.ehp * roundHpMul();
   e.hp = e.maxhp;
   e.spd = def.spd * (1.12 - scale * 0.18) * (0.9 + Math.random() * 0.25);
-  e.dmg = def.dmg * (1 + tier * 0.3) * scale * diff.edmg * roundDmg;
+  e.dmg = def.dmg * (1 + tier * 0.3) * scale * diff.edmg * roundDmgMul();
   e.lastSrc = undefined;
   e.xp = Math.max(1, Math.round(def.xp * (1 + tier * 0.9) * scale));
   e.r = def.r * scale;
+  e.dh = def.dh;
   e.slowT = 0; e.poisonT = 0; e.poisonDps = 0; e.poisonTick = 0;
   e.kbx = 0; e.kby = 0; e.flash = 0;
   e.wob = Math.random() * 6.28;
+  e.shootCd = e.ai === 'ranged' ? 1 + Math.random() : 0;   // spitter fire timer
+  e.fleeing = false;
   return e;
 }
 
@@ -262,22 +275,34 @@ function spawnWave(dt) {
     const x = Math.min(WORLD - 30, Math.max(30, player.x + Math.cos(a) * d));
     const y = Math.min(WORLD - 30, Math.max(30, player.y + Math.sin(a) * d));
     const tier = Math.max(0, maxTier - ((Math.random() ** 2) * 3 | 0));
+    // higher difficulties bring the nastier spawns forward
+    const early = (G.diff ? G.diff.id : 0) * 45;   // seconds earlier per difficulty tier
     let type = 'minyar';
     const r = Math.random();
-    if (t > 210 && r < Math.min(0.05, (t - 210) / 7000)) type = 'clubbo';
-    else if (t > 75 && r < Math.min(0.14, 0.025 + t / 2400)) type = 'demonder';
+    if (t > 210 - early && r < Math.min(0.05, (t - (210 - early)) / 7000)) type = 'clubbo';
+    else if (t > 130 - early && r < Math.min(0.07, (t - (130 - early)) / 4000)) type = 'warden';
+    else if (t > 95 - early && r < Math.min(0.09, (t - (95 - early)) / 3200)) type = 'runner';
+    else if (t > 60 - early && r < Math.min(0.11, (t - (60 - early)) / 2600)) type = 'spitter';
+    else if (t > 75 - early && r < Math.min(0.14, 0.025 + t / 2400)) type = 'demonder';
     spawnEnemy(type, tier, x, y);
-    // herald the first elite of each kind
-    if (type === 'demonder' && !G.sawDemonder) {
-      G.sawDemonder = true;
-      banner('A DEMONDER STALKS THE JUNGLE!');
-      Sound.playFile('assets/audio/enemies/demonder_entrance.wav', 0.85);
-    } else if (type === 'clubbo' && !G.sawClubbo) {
-      G.sawClubbo = true;
-      banner('CLUBBO! RUN. OR DON\'T.');
-      Sound.playFile('assets/audio/enemies/clubbo_entrance.wav', 0.9);
-    }
+    heraldEnemy(type);
   }
+}
+function heraldEnemy(type) {
+  const seen = G.seen || (G.seen = {});
+  if (seen[type]) return;
+  seen[type] = 1;
+  const heralds = {
+    demonder: ['A DEMONDER STALKS THE JUNGLE!', 'enemies/demonder_entrance.wav'],
+    clubbo:   ["CLUBBO! RUN. OR DON'T.", 'enemies/clubbo_entrance.wav'],
+    spitter:  ['SPITTERS! THEY STRIKE FROM RANGE', null],
+    warden:   ['A WARDEN — ARMORED, SLOW TO FALL', null],
+    runner:   ['RUNNERS! THEY BOLT AND BURST', null],
+  };
+  const h = heralds[type];
+  if (!h) return;
+  banner(h[0]);
+  if (h[1]) Sound.playFile('assets/audio/' + h[1], 0.85);
 }
 
 // ---------------- Damage ----------------
@@ -324,7 +349,15 @@ function killEnemy(e) {
   if (e.lastSrc != null && heroState[e.lastSrc]) heroState[e.lastSrc].kills++;
   dropGem(e.x, e.y, e.xp);
   const tint = `hsl(${TIERS[e.tier].hue},65%,55%)`;
-  spawnParts(e.x, e.y, tint, e.type === 'minyar' ? 6 : 12, 140);
+  spawnParts(e.x, e.y, tint, e.base === 'minyar' ? 6 : 12, 140);
+  // runner detonates on death — a small burst you have to step away from
+  if (e.ai === 'runner') {
+    const R = 62;
+    effects.push({ type: 'explo', x: e.x, y: e.y, r: R, t: 0, dur: 0.28, color: '#fff59d' });
+    spawnParts(e.x, e.y, '#fff59d', 12, 200);
+    if ((player.x - e.x) ** 2 + (player.y - e.y) ** 2 < R * R) hurtPlayer(e.dmg * 1.4);
+    Sound.sfx.nova();
+  }
   if (e.type === 'clubbo') {
     Sound.playFile('assets/audio/enemies/clubbo_defeat.wav', 0.85);
     G.shake = Math.max(G.shake, 6);
@@ -340,17 +373,18 @@ function damageEnemy(e, dmg, o) {
   if (e.isBoss) return damageBoss(dmg, o);
   if (e.isCage) return damageCage(e, dmg);
   if (!e.alive) return;
+  if (e.ai === 'shielded') dmg *= 0.55;           // warden: heavy armor — needs commitment or DoT
   e.hp -= dmg;
   e.flash = 0.09;
   if (o.src != null) e.lastSrc = o.src;
   addDamage(o.src, dmg);
   if (o.slow) e.slowT = Math.max(e.slowT, o.slow);
   if (o.poison) { e.poisonT = o.poisonT; e.poisonDps = Math.max(e.poisonDps, o.poison); }
-  if (o.knock) {
+  if (o.knock && e.ai !== 'shielded') {           // wardens don't flinch
     const kl = Math.hypot(o.kx, o.ky) || 1;
     e.kbx += o.kx / kl * o.knock; e.kby += o.ky / kl * o.knock;
   }
-  if (dmg >= 18 || e.type !== 'minyar') addFloater(e.x, e.y - e.r - 8, Math.round(dmg), '#fff');
+  if (dmg >= 18 || e.base !== 'minyar') addFloater(e.x, e.y - e.r - 8, Math.round(dmg), e.ai === 'shielded' ? '#b0bec5' : '#fff');
   if (e.hp <= 0) killEnemy(e);
 }
 
@@ -788,7 +822,24 @@ function updateEnemies(dt) {
       }
     }
 
-    if (dist > 1) { e.x += ddx / dist * sp * dt; e.y += ddy / dist * sp * dt; }
+    // ---- movement AI ----
+    let mvx = ddx, mvy = ddy, mvd = dist;
+    if (e.ai === 'ranged') {
+      // keep ~250px away and spit; back off if too close
+      const ideal = 250;
+      if (dist < ideal - 40) { mvx = -ddx; mvy = -ddy; }
+      else if (dist < ideal + 40) { mvx = -ddy; mvy = ddx; }   // strafe
+      e.shootCd -= dt;
+      if (e.shootCd <= 0 && dist < 520) {
+        e.shootCd = 1.8 + Math.random() * 0.8;
+        const ang = Math.atan2(ddy, ddx);
+        spawnEBullet(e.x, e.y, Math.cos(ang) * 210, Math.sin(ang) * 210, e.dmg, 8, 3.4);
+      }
+    } else if (e.ai === 'runner') {
+      if (e.hp < e.maxhp * 0.35) { e.fleeing = true; }
+      if (e.fleeing) { mvx = -ddx; mvy = -ddy; sp *= 1.35; }
+    }
+    if (mvd > 1) { const inv = 1 / (Math.hypot(mvx, mvy) || 1); e.vx0 = mvx * inv; e.vy0 = mvy * inv; e.x += e.vx0 * sp * dt; e.y += e.vy0 * sp * dt; }
     // knockback decay
     e.x += e.kbx * dt; e.y += e.kby * dt;
     e.kbx *= Math.pow(0.002, dt); e.kby *= Math.pow(0.002, dt);
@@ -821,12 +872,12 @@ function spawnBoss() {
   const a = Math.random() * 6.283;
   const diff = G.diff || DIFFICULTIES[0];
   const round = G.round || 1;
-  const hp = BOSS.hp * diff.bhp * (1 + ROUND_BHP * (round - 1));
+  const hp = BOSS.hp * diff.bhp * roundBossMul();
   G.boss = {
     alive: true, isBoss: true,
     x: Math.min(WORLD - 200, Math.max(200, player.x + Math.cos(a) * 640)),
     y: Math.min(WORLD - 200, Math.max(200, player.y + Math.sin(a) * 640)),
-    hp, maxhp: hp, r: BOSS.r, spd: BOSS.spd, dmg: BOSS.dmg * diff.edmg * (1 + ROUND_EDMG * (round - 1)),
+    hp, maxhp: hp, r: BOSS.r, spd: BOSS.spd, dmg: BOSS.dmg * diff.edmg * roundDmgMul(),
     slowT: 0, flash: 0, wob: 0, enraged: round > 1,   // returning Glob starts angry
     volleyCd: 4, summonCd: 8, slamCd: 12,
   };
@@ -891,6 +942,14 @@ function updateBoss(dt) {
   }
 }
 
+function spawnEBullet(x, y, vx, vy, dmg, size, life) {
+  for (const eb of ebullets) {
+    if (eb.alive) continue;
+    eb.alive = true; eb.x = x; eb.y = y - 20; eb.vx = vx; eb.vy = vy;
+    eb.dmg = dmg; eb.size = size; eb.life = life; eb.t = 0;
+    return;
+  }
+}
 function updateEbullets(dt) {
   for (const eb of ebullets) {
     if (!eb.alive) continue;
@@ -1185,12 +1244,35 @@ function render(dt) {
   for (let i = 0; i < MAX_ENEMIES; i++) {
     const e = enemies[i];
     if (!e.alive || !onScreen(e.x, e.y, 90)) continue;
-    const spr = Sprites.get(e.type + e.tier);
-    const h = ENEMIES[e.type].dh * e.scale;
+    const spr = Sprites.get(e.base + e.tier);
+    const h = e.dh * e.scale;
     const w = spr.width / spr.height * h;
     shadow(e.x, e.y + 2, w * 0.9);
+    const cy = e.y - h / 2 + 6;
+    // runner: motion streaks behind
+    if (e.ai === 'runner') {
+      const ma = Math.atan2(e.vy0 || 0, e.vx0 || 0);
+      ctx.globalAlpha = 0.3; ctx.strokeStyle = '#fff59d'; ctx.lineWidth = 2;
+      for (let s = 1; s <= 2; s++) { ctx.beginPath(); ctx.moveTo(e.x - Math.cos(ma) * s * 8, cy - Math.sin(ma) * s * 8); ctx.lineTo(e.x - Math.cos(ma) * (s * 8 + 7), cy - Math.sin(ma) * (s * 8 + 7)); ctx.stroke(); }
+      ctx.globalAlpha = 1;
+    }
     const squash = 1 + Math.sin(G.time * 9 + e.wob) * 0.05;
     ctx.drawImage(spr, e.x - w / 2, e.y - h * squash + 6, w, h * squash);
+    // warden: a shield arc facing the player (front-armored)
+    if (e.ai === 'shielded') {
+      const fa = Math.atan2(player.y - e.y, player.x - e.x);
+      ctx.strokeStyle = '#b0bec5'; ctx.lineWidth = 3.5;
+      ctx.globalAlpha = 0.85;
+      ctx.beginPath(); ctx.arc(e.x, cy, e.r + 6, fa - 0.9, fa + 0.9); ctx.stroke();
+      ctx.globalAlpha = 1;
+    }
+    // spitter: a glowing muzzle marker so ranged threats read at a glance
+    if (e.ai === 'ranged') {
+      ctx.globalAlpha = 0.6 + Math.sin(G.time * 8 + e.wob) * 0.3;
+      ctx.fillStyle = '#b2ff59';
+      ctx.beginPath(); ctx.arc(e.x, cy - e.r * 0.3, 3.5, 0, 7); ctx.fill();
+      ctx.globalAlpha = 1;
+    }
     if (e.flash > 0) {
       ctx.globalAlpha = 0.55; ctx.fillStyle = '#fff';
       ctx.beginPath(); ctx.arc(e.x, e.y - h / 2 + 6, e.r, 0, 7); ctx.fill();
@@ -1751,7 +1833,7 @@ function newGame(heroIdx, diffIdx) {
   G.running = true; G.over = false; G.victory = false; G.pendingLv = 0;
   G.time = 0; G.kills = 0; G.level = 1; G.xp = 0; G.xpNext = 10;
   G.spawnAcc = 0; G.boss = null; G.bossWarned = false; G.shake = 0;
-  G.sawDemonder = false; G.sawClubbo = false;
+  G.seen = {};
   G.flash = 0; G.hurtFlash = 0; G.powerHintShown = false;
   G.diff = DIFFICULTIES[Math.max(0, Math.min(DIFFICULTIES.length - 1, diffIdx | 0))];
   G.startHero = heroIdx;

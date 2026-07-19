@@ -133,10 +133,15 @@ const TIERS = [
 ];
 
 // dh = on-screen display height at scale 1 (sprite files vary in resolution)
+// ai: chase (default) | ranged (keeps distance, spits) | shielded (front armor) | runner (flees low, bursts)
 const ENEMIES = {
   minyar:   { hp:9,   spd:62, dmg:8,  xp:1,  r:13, dh:52 },
   demonder: { hp:130, spd:46, dmg:18, xp:8,  r:20, dh:88 },
   clubbo:   { hp:640, spd:32, dmg:34, xp:30, r:30, dh:118 },
+  // new archetypes (reuse the minyar/demonder art, tinted + marked)
+  spitter:  { hp:55,  spd:40, dmg:14, xp:6,  r:16, dh:64,  ai:'ranged',   base:'minyar' },
+  warden:   { hp:340, spd:38, dmg:24, xp:14, r:22, dh:92,  ai:'shielded', base:'demonder' },
+  runner:   { hp:26,  spd:104,dmg:10, xp:5,  r:14, dh:56,  ai:'runner',   base:'minyar' },
 };
 
 const BOSS = { hp:48000, spd:40, dmg:45, r:66, xp:0, dh:190 };   // the Hungry King is no pushover
