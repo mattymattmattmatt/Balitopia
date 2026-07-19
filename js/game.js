@@ -405,6 +405,7 @@ function killBoss(b) {
   b.alive = false;
   G.bossKills++;
   G.shake = 18;
+  hitStop(0.32);   // big dramatic freeze on the kill
   spawnParts(b.x, b.y, '#8bc34a', 60, 260);
   spawnParts(b.x, b.y, '#ffd54f', 40, 200);
   for (let i = 0; i < 6; i++)
@@ -418,7 +419,7 @@ function killBoss(b) {
   G.healPct(0.5);
   $('boss-hp-wrap').classList.add('hidden');
   banner(G.bossKills === 1 ? '👑 KING GLOB IS DOWN — BALITOPIA IS FREE!' : `👑 GLOB SLAIN ×${G.bossKills}!`);
-  banner(`🌀 ROUND ${G.round} — THE ISLAND TREMBLES AGAIN`);
+  banner(`🌀 ROUND ${G.round} — ${roundFlavor(G.round).toUpperCase()}`);
   buzz(60);
   Sound.playMusic('music/victory.mp3', { loop: false, vol: 0.6 });
   setTimeout(() => {
@@ -1096,9 +1097,12 @@ function frame(ts) {
   requestAnimationFrame(frame);
   const dt = Math.min(0.05, (ts - last) / 1000 || 0.016);
   last = ts;
+  // hit-stop: freeze the sim for a few frames on impactful hits so they land with weight
+  if (G.hitStop > 0 && G.running && !G.over) { G.hitStop -= dt; render(0); return; }
   if (G.running && !G.over && window.innerWidth > window.innerHeight) update(dt);
   render(dt);
 }
+function hitStop(dur) { if (prefs.motion) G.hitStop = Math.max(G.hitStop || 0, dur); }
 
 function update(dt) {
   G.time += dt;
@@ -1288,8 +1292,26 @@ function render(dt) {
       ctx.globalAlpha = 1;
     }
     if (e.poisonT > 0) {
+      // poison: a bubbling green miasma with rising blips
       ctx.globalAlpha = 0.4; ctx.fillStyle = '#8bc34a';
       ctx.beginPath(); ctx.arc(e.x, e.y - h / 2 + 6, e.r * 0.6, 0, 7); ctx.fill();
+      ctx.globalAlpha = 0.7; ctx.fillStyle = '#c5e1a5';
+      for (let k = 0; k < 3; k++) {
+        const ph = (G.time * 1.6 + k * 0.4 + e.wob) % 1;
+        ctx.beginPath(); ctx.arc(e.x + Math.sin(ph * 6 + k) * e.r * 0.5, e.y - h * 0.4 - ph * e.r, (1 - ph) * 2.4, 0, 7); ctx.fill();
+      }
+      ctx.globalAlpha = 1;
+    }
+    if (e.slowT > 0) {
+      // frost: pale blue rime + a few crystal spikes so chilled foes read instantly
+      const cy2 = e.y - h / 2 + 6;
+      ctx.globalAlpha = 0.28; ctx.fillStyle = '#b3e5fc';
+      ctx.beginPath(); ctx.arc(e.x, cy2, e.r * 0.9, 0, 7); ctx.fill();
+      ctx.globalAlpha = 0.85; ctx.strokeStyle = '#e1f5fe'; ctx.lineWidth = 1.5;
+      for (let k = 0; k < 4; k++) {
+        const a = k / 4 * 6.283 + e.wob, ix = e.x + Math.cos(a) * e.r * 0.8, iy = cy2 + Math.sin(a) * e.r * 0.8;
+        ctx.beginPath(); ctx.moveTo(ix, iy); ctx.lineTo(ix + Math.cos(a) * 4, iy + Math.sin(a) * 4); ctx.stroke();
+      }
       ctx.globalAlpha = 1;
     }
     if (e.type !== 'minyar' && e.hp < e.maxhp) {
@@ -1524,6 +1546,45 @@ function render(dt) {
     ctx.fillStyle = vg;
     ctx.fillRect(0, 0, cw, ch);
   }
+
+  // ---- minimap (screen space, bottom-left) ----
+  if (G.running && !G.over && prefs.minimap) drawMinimap();
+}
+
+function drawMinimap() {
+  const size = Math.round(Math.min(cw, ch) * 0.2);   // scales with viewport
+  const pad = 10, mx = pad, my = ch - size - pad;
+  const s = size / WORLD;
+  ctx.save();
+  ctx.globalAlpha = 0.72;
+  ctx.fillStyle = 'rgba(6,26,18,.85)';
+  ctx.fillRect(mx, my, size, size);
+  ctx.strokeStyle = 'rgba(255,255,255,.25)'; ctx.lineWidth = 1;
+  ctx.strokeRect(mx + 0.5, my + 0.5, size, size);
+  const px = (wx) => mx + wx * s, py = (wy) => my + wy * s;
+  // unbroken cages
+  ctx.fillStyle = '#ffd54f';
+  for (const c of cages) {
+    if (c.broken) continue;
+    ctx.fillRect(px(c.x) - 1.5, py(c.y) - 1.5, 3, 3);
+  }
+  // boss
+  if (G.boss && G.boss.alive) {
+    ctx.fillStyle = '#ff5252';
+    const bx = px(G.boss.x), by = py(G.boss.y);
+    ctx.beginPath(); ctx.arc(bx, by, 3.5 + Math.sin(G.time * 6) * 1, 0, 7); ctx.fill();
+  }
+  // allies
+  ctx.fillStyle = 'rgba(129,212,250,.9)';
+  for (const al of allies) ctx.fillRect(px(al.x) - 1, py(al.y) - 1, 2, 2);
+  // player
+  ctx.fillStyle = '#fff';
+  const ppx = px(player.x), ppy = py(player.y);
+  ctx.beginPath(); ctx.arc(ppx, ppy, 2.6, 0, 7); ctx.fill();
+  ctx.strokeStyle = 'rgba(255,213,79,.9)'; ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.arc(ppx, ppy, 4.5, 0, 7); ctx.stroke();
+  ctx.restore();
+  ctx.globalAlpha = 1;
 }
 
 // ---------------- HUD ----------------
@@ -1704,6 +1765,7 @@ function powershot() {
 
   effects.push({ type: 'shock', x: player.x, y: player.y, r: R, t: 0, dur: 0.5, color: hero.accent });
   G.flash = 0.4;
+  hitStop(0.08);   // brief punch of weight as the shockwave lands
   G.shake = Math.max(G.shake, 12);
   player.iv = Math.max(player.iv, 1.2);
   Sound.sfx.powershot();
@@ -1766,10 +1828,7 @@ function levelUpPool() {
   return pool;
 }
 // ---------------- Level up: 3 face-down mystery cards ----------------
-function showLevelUp() {
-  G.running = false;
-  const row = $('upgrade-row');
-  row.innerHTML = '';
+function rollLevelUpCards() {
   const pool = levelUpPool();
   const chosen = [], seen = new Set();
   while (chosen.length < 3 && pool.length) {
@@ -1777,35 +1836,52 @@ function showLevelUp() {
     if (seen.has(pick.id)) continue;   // don't offer the same card twice (double-weighting can dup)
     seen.add(pick.id); chosen.push(pick);
   }
+  return chosen;
+}
+function closeLevelUp() {
+  G.pendingLv--;
+  $('screen-levelup').classList.add('hidden');
+  if (G.pendingLv > 0) showLevelUp();
+  else if (!G.over) G.running = true;
+}
+function showLevelUp() {
+  G.running = false;
+  const row = $('upgrade-row');
+  row.innerHTML = '';
+  const chosen = rollLevelUpCards();
   let picked = false;
-  for (const pick of chosen) {
-    const card = document.createElement('div');
-    card.className = 'upgrade-card mystery' + (pick.hero !== undefined ? ' signature' : '');
-    card.innerHTML =
-      `<div class="mc-inner">
-         <div class="mc-face mc-front"><span>?</span></div>
-         <div class="mc-face mc-back">
-           ${pick.hero !== undefined ? '<div class="mc-sig">SIGNATURE</div>' : ''}
-           <div class="uc-icon">${pick.icon}</div><h3>${pick.name}</h3><p>${pick.desc}</p>
-         </div>
-       </div>`;
-    card.addEventListener('pointerdown', () => {
-      if (picked) return;
-      picked = true;
-      Sound.sfx.uiClick();
-      card.classList.add('flipped');
-      row.querySelectorAll('.upgrade-card').forEach(c => { if (c !== card) c.classList.add('faded'); });
-      if (pick.once) G.mods.taken[pick.id] = true;
-      pick.apply(G.mods, G);
-      setTimeout(() => {
-        G.pendingLv--;
-        $('screen-levelup').classList.add('hidden');
-        if (G.pendingLv > 0) showLevelUp();
-        else if (!G.over) G.running = true;
-      }, 850);
-    });
-    row.appendChild(card);
-  }
+  const renderCards = cards => {
+    row.innerHTML = '';
+    for (const pick of cards) {
+      const card = document.createElement('div');
+      card.className = 'upgrade-card mystery' + (pick.hero !== undefined ? ' signature' : '');
+      card.innerHTML =
+        `<div class="mc-inner">
+           <div class="mc-face mc-front"><span>?</span></div>
+           <div class="mc-face mc-back">
+             ${pick.hero !== undefined ? '<div class="mc-sig">SIGNATURE</div>' : ''}
+             <div class="uc-icon">${pick.icon}</div><h3>${pick.name}</h3><p>${pick.desc}</p>
+           </div>
+         </div>`;
+      card.addEventListener('pointerdown', () => {
+        if (picked) return;
+        picked = true;
+        Sound.sfx.uiClick();
+        card.classList.add('flipped');
+        row.querySelectorAll('.upgrade-card').forEach(c => { if (c !== card) c.classList.add('faded'); });
+        if (pick.once) G.mods.taken[pick.id] = true;
+        pick.apply(G.mods, G);
+        setTimeout(closeLevelUp, 850);
+      });
+      row.appendChild(card);
+    }
+  };
+  renderCards(chosen);
+  // reroll / skip controls
+  const rerollN = $('lu-reroll-n');
+  const rerollBtn = $('btn-lu-reroll');
+  if (rerollN) rerollN.textContent = '×' + G.rerolls;
+  if (rerollBtn) rerollBtn.classList.toggle('spent', G.rerolls <= 0);
   $('screen-levelup').classList.remove('hidden');
 }
 
@@ -1867,7 +1943,7 @@ function startDaily() {
 function newGame(heroIdx, diffIdx, daily) {
   G.running = true; G.over = false; G.victory = false; G.pendingLv = 0;
   G.time = 0; G.kills = 0; G.level = 1; G.xp = 0; G.xpNext = 10;
-  G.spawnAcc = 0; G.boss = null; G.bossWarned = false; G.shake = 0;
+  G.spawnAcc = 0; G.boss = null; G.bossWarned = false; G.shake = 0; G.hitStop = 0;
   G.seen = {};
   G.flash = 0; G.hurtFlash = 0; G.powerHintShown = false;
   G.daily = daily || null;
@@ -1875,6 +1951,7 @@ function newGame(heroIdx, diffIdx, daily) {
   G.startHero = heroIdx;
   G.possessedOther = false;
   G.round = 1; G.bossKills = 0; G.nextBossAt = BOSS_TIME;
+  G.rerolls = 3 + (daily ? 0 : ((loadSave().perks || {}).fortune || 0));
   heroState = HEROES.map(() => ({ dmg: 0, tier: 0, charge: 0, kills: 0, control: 0 }));
   heroMods = HEROES.map(freshHeroMod);
   powerWaves = [];
@@ -2102,6 +2179,95 @@ function buildStatsScreen(rank) {
   $('over-heroes').scrollTop = 0;
 }
 
+// ---------------- Shareable run-recap card ----------------
+// Composes a 1080×1080 poster of the run (lead Guardian, score, key stats,
+// unlocked achievements) and hands it to the Web Share API, falling back to a
+// PNG download. A genuine "show your friends" wow-moment.
+function buildRecapCanvas() {
+  const S = 1080, c = document.createElement('canvas');
+  c.width = S; c.height = S;
+  const score = G.score || 0;
+  const x = c.getContext('2d');
+  // backdrop
+  const bg = x.createLinearGradient(0, 0, 0, S);
+  const won = G.victory;
+  bg.addColorStop(0, won ? '#123a1f' : '#2a1216');
+  bg.addColorStop(1, '#05140d');
+  x.fillStyle = bg; x.fillRect(0, 0, S, S);
+  // vignette frame
+  x.strokeStyle = won ? 'rgba(255,213,79,.5)' : 'rgba(239,154,154,.4)'; x.lineWidth = 6;
+  x.strokeRect(28, 28, S - 56, S - 56);
+  x.textAlign = 'center';
+  // title
+  x.fillStyle = '#ffd54f'; x.font = 'bold 60px "Trebuchet MS",sans-serif';
+  x.fillText('BALITOPIA', S / 2, 118);
+  x.fillStyle = '#9fd8b4'; x.font = '26px "Trebuchet MS",sans-serif';
+  x.fillText('GUARDIANS OF THE BROKEN CAGES', S / 2, 158);
+  // lead portrait
+  const port = Sprites.portrait(G.startHero, 300);
+  const pw = port.width || 300;
+  x.save();
+  x.shadowColor = 'rgba(0,0,0,.6)'; x.shadowBlur = 30;
+  x.drawImage(port, S / 2 - pw / 2, 200, pw, pw);
+  x.restore();
+  const lead = HEROES[G.startHero];
+  x.fillStyle = '#fff'; x.font = 'bold 46px "Trebuchet MS",sans-serif';
+  x.fillText(lead.name.toUpperCase(), S / 2, 560);
+  const leadTier = heroState[G.startHero] ? heroState[G.startHero].tier : 0;
+  x.fillStyle = TIER_COLORS[leadTier]; x.font = 'bold 26px "Trebuchet MS",sans-serif';
+  x.fillText(TIER_NAMES[leadTier] + '  ·  ◆ ' + G.diff.name + (G.round > 1 ? '  ·  🌀 ROUND ' + G.round : ''), S / 2, 598);
+  // score
+  x.fillStyle = won ? '#ffd54f' : '#ef9a9a'; x.font = 'bold 130px "Trebuchet MS",sans-serif';
+  x.fillText(score.toLocaleString(), S / 2, 740);
+  x.fillStyle = '#9fd8b4'; x.font = '28px "Trebuchet MS",sans-serif';
+  x.fillText(won ? (G.bossKills > 1 ? `KING GLOB SLAIN ×${G.bossKills}` : 'KING GLOB SLAIN') : 'FINAL SCORE', S / 2, 782);
+  // stat strip
+  const stats = [
+    ['⏱', fmtTime(G.time | 0)], ['☠', G.kills.toLocaleString()],
+    ['⛓', freedSet.size + '/24'], ['★', 'LV ' + G.level],
+  ];
+  const bw = 224, gap = 12, totalW = stats.length * bw + (stats.length - 1) * gap, sx = S / 2 - totalW / 2, sy = 830;
+  stats.forEach(([ic, v], i) => {
+    const bx = sx + i * (bw + gap);
+    x.fillStyle = 'rgba(255,255,255,.06)'; roundRect(x, bx, sy, bw, 110, 16); x.fill();
+    x.fillStyle = '#ffd54f'; x.font = '38px "Trebuchet MS",sans-serif';
+    x.fillText(ic, bx + bw / 2, sy + 50);
+    x.fillStyle = '#fff'; x.font = 'bold 34px "Trebuchet MS",sans-serif';
+    x.fillText(v, bx + bw / 2, sy + 92);
+  });
+  // footer tagline
+  x.fillStyle = '#cfd8e6'; x.font = 'italic 26px "Trebuchet MS",sans-serif';
+  x.fillText('Can you break more cages?', S / 2, 1010);
+  return c;
+}
+function roundRect(x, rx, ry, rw, rh, r) {
+  x.beginPath();
+  x.moveTo(rx + r, ry); x.arcTo(rx + rw, ry, rx + rw, ry + rh, r);
+  x.arcTo(rx + rw, ry + rh, rx, ry + rh, r); x.arcTo(rx, ry + rh, rx, ry, r);
+  x.arcTo(rx, ry, rx + rw, ry, r); x.closePath();
+}
+async function shareRecap() {
+  Sound.sfx.uiClick();
+  let canvas;
+  try { canvas = buildRecapCanvas(); } catch (e) { return; }
+  canvas.toBlob(async blob => {
+    if (!blob) return;
+    const file = new File([blob], 'balitopia-run.png', { type: 'image/png' });
+    // native share sheet where supported (mobile), otherwise download
+    if (navigator.canShare && navigator.canShare({ files: [file] })) {
+      try {
+        await navigator.share({ files: [file], title: 'Balitopia', text: `I scored ${G.score.toLocaleString()} in Balitopia!` });
+        return;
+      } catch (e) { /* user cancelled or unsupported — fall through to download */ }
+    }
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = 'balitopia-run.png';
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 4000);
+  }, 'image/png');
+}
+
 function endGame() {
   if (G.over) return;
   G.over = true;
@@ -2230,6 +2396,7 @@ function bindSettings() {
     $('set-haptics').checked = !!prefs.haptics;
     $('set-motion').checked = !prefs.motion;         // checkbox = "reduced motion ON"
     $('set-colorblind').checked = !!prefs.colorblind;
+    $('set-minimap').checked = !!prefs.minimap;
     $('set-uiscale').value = prefs.uiscale; $('set-uiscale-v').textContent = prefs.uiscale + '%';
   };
   $('set-music').addEventListener('input', e => { prefs.musicVol = +e.target.value; $('set-music-v').textContent = prefs.musicVol + '%'; savePrefs(); });
@@ -2238,6 +2405,7 @@ function bindSettings() {
   $('set-haptics').addEventListener('change', e => { prefs.haptics = e.target.checked ? 1 : 0; savePrefs(); if (prefs.haptics) buzz(20); });
   $('set-motion').addEventListener('change', e => { prefs.motion = e.target.checked ? 0 : 1; savePrefs(); });
   $('set-colorblind').addEventListener('change', e => { prefs.colorblind = e.target.checked ? 1 : 0; savePrefs(); });
+  $('set-minimap').addEventListener('change', e => { prefs.minimap = e.target.checked ? 1 : 0; savePrefs(); });
   $('set-uiscale').addEventListener('input', e => { prefs.uiscale = +e.target.value; $('set-uiscale-v').textContent = prefs.uiscale + '%'; savePrefs(); });
   $('btn-export-save').addEventListener('click', exportSave);
   $('btn-import-save').addEventListener('click', importSave);
@@ -2336,7 +2504,7 @@ function saveGame(s) {
 }
 
 // ---------------- Preferences ----------------
-const PREF_DEFAULTS = { musicVol: 80, sfxVol: 100, haptics: 1, motion: 1, colorblind: 0, uiscale: 100 };
+const PREF_DEFAULTS = { musicVol: 80, sfxVol: 100, haptics: 1, motion: 1, colorblind: 0, uiscale: 100, minimap: 1 };
 let prefs = { ...PREF_DEFAULTS };
 function loadPrefs() {
   const save = loadSave();
@@ -2434,6 +2602,7 @@ function buildTitle() {
   $('btn-select-back').addEventListener('click', () => { Sound.sfx.uiBack(); goStory(); });
   $('btn-records-back').addEventListener('click', closeRecords);
   $('btn-over-records').addEventListener('click', openRecords);
+  $('btn-over-share').addEventListener('click', shareRecap);
   $('btn-over-menu').addEventListener('click', () => { Sound.sfx.uiBack(); goTitle(); });
   $('btn-menu-settings').addEventListener('click', () => { Sound.ensure(); openSettings('screen-title'); });
   $('btn-settings-back').addEventListener('click', closeSettings);
@@ -2535,6 +2704,17 @@ function wire() {
       endGame();
     }
   });
+  $('btn-lu-reroll').addEventListener('click', () => {
+    if (G.rerolls <= 0) return;
+    G.rerolls--;
+    Sound.sfx.uiSelect();
+    showLevelUp();   // re-roll a fresh trio of face-down cards
+  });
+  $('btn-lu-skip').addEventListener('click', () => {
+    Sound.sfx.uiBack();
+    if (player) player.hp = Math.min(maxHP(), player.hp + maxHP() * 0.15);   // reward: patch up instead of powering up
+    closeLevelUp();
+  });
   $('btn-mute').addEventListener('click', () => {
     const m = Sound.toggleMute();
     $('btn-mute').classList.toggle('muted', m);
@@ -2572,6 +2752,7 @@ window.__balitopia = {
   joys: { move: joyMove },
   hurtPlayer, dropGem, gainXP, levelUpPool, showLevelUp,
   possess, breakCage, newGame, spawnEnemy, spawnBoss, powershot, addDamage,
+  buildRecapCanvas, hitStop, prefs: () => prefs,
 };
 
 })();

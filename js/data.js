@@ -203,8 +203,27 @@ const PERKS = [
   { id:'xp',    icon:'📜', name:'Old Wisdom',     desc:'+6% XP gained',            max:3, cost:l=>45 + l * 35,  apply:(m,l)=>m.xpGain *= 1 + 0.06 * l },
   { id:'magnet',icon:'🧲', name:'Gem Sense',      desc:'+12% pickup range',        max:3, cost:l=>35 + l * 25,  apply:(m,l)=>m.magnet *= 1 + 0.12 * l },
   { id:'start', icon:'⛓', name:'Head Start',     desc:'Begin with 1 cage already broken', max:3, cost:l=>80 + l * 70, apply:()=>{} },
+  { id:'fortune',icon:'🎲', name:'Fortune',        desc:'+1 level-up reroll per run', max:3, cost:l=>60 + l * 55, apply:()=>{} },
 ];
 const SHELLS_PER_SCORE = 500;   // 1 shell per this much score
+
+// ---------- Endless round narrative beats ----------
+// Shown when King Glob crawls back out for the next round. Index by round number
+// (clamped); each is a short escalating taunt to give endless mode a story arc.
+const ROUND_FLAVOR = [
+  '',  // round 0/1 unused (first boss uses its own banner)
+  '',
+  'The mountain splits. He remembers dying — and hates you for it.',
+  'Cracks race across the island. Glob returns wearing the dark like armor.',
+  'The sea pulls back in fear. Something older wakes beneath the King.',
+  'The sky bruises purple. Glob has stopped pretending to be alive.',
+  'Reality thins. Each death only makes the Hungry King hungrier.',
+  'The cages you broke rattle with laughter. He is legion now.',
+  'The Balance screams. You are the only thing still holding the line.',
+  'Time folds. Glob has been killing you in every world at once.',
+  'There is no round after this that has a name. Only you, and the end of him.',
+];
+const roundFlavor = r => ROUND_FLAVOR[Math.min(r, ROUND_FLAVOR.length - 1)] || 'The horde thickens. Hold the line.';
 
 // ---------- Achievements ----------
 // Checked at run end against a run context + lifetime save stats.

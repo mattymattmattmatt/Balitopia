@@ -65,6 +65,7 @@
     <label class="set-row toggle"><span>Vibration (haptics)</span><input type="checkbox" id="set-haptics"></label>
     <label class="set-row toggle"><span>Reduced motion</span><input type="checkbox" id="set-motion"></label>
     <label class="set-row toggle"><span>Colorblind danger pips</span><input type="checkbox" id="set-colorblind"></label>
+    <label class="set-row toggle"><span>Minimap</span><input type="checkbox" id="set-minimap"></label>
     <label class="set-row"><span>UI text size</span><input type="range" id="set-uiscale" min="90" max="130" step="5"><b id="set-uiscale-v"></b></label>
     <div class="set-danger">
       <button class="menu-btn2" id="btn-export-save">EXPORT SAVE</button>
@@ -150,6 +151,10 @@
 <div id="screen-levelup" class="screen hidden">
   <h2 class="select-title">LEVEL UP!</h2>
   <div id="upgrade-row"></div>
+  <div id="levelup-ctrls">
+    <button class="lu-ctrl" id="btn-lu-reroll">🎲 REROLL <b id="lu-reroll-n"></b></button>
+    <button class="lu-ctrl" id="btn-lu-skip">⏭ SKIP <span class="lu-ctrl-sub">+15% HP</span></button>
+  </div>
 </div>
 
 <!-- ===== Game Over / Victory — detailed run stats ===== -->
@@ -166,6 +171,7 @@
     <div id="over-heroes"></div>
     <div id="over-btns">
       <button class="big-btn" id="btn-retry">PLAY AGAIN</button>
+      <button class="menu-btn2" id="btn-over-share">📸 SHARE</button>
       <button class="menu-btn2" id="btn-over-records">RECORDS</button>
       <button class="menu-btn2" id="btn-over-menu">MENU</button>
     </div>
