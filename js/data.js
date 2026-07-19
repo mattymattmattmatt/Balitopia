@@ -133,10 +133,15 @@ const TIERS = [
 ];
 
 // dh = on-screen display height at scale 1 (sprite files vary in resolution)
+// ai: chase (default) | ranged (keeps distance, spits) | shielded (front armor) | runner (flees low, bursts)
 const ENEMIES = {
   minyar:   { hp:9,   spd:62, dmg:8,  xp:1,  r:13, dh:52 },
   demonder: { hp:130, spd:46, dmg:18, xp:8,  r:20, dh:88 },
   clubbo:   { hp:640, spd:32, dmg:34, xp:30, r:30, dh:118 },
+  // new archetypes (reuse the minyar/demonder art, tinted + marked)
+  spitter:  { hp:55,  spd:40, dmg:14, xp:6,  r:16, dh:64,  ai:'ranged',   base:'minyar' },
+  warden:   { hp:340, spd:38, dmg:24, xp:14, r:22, dh:92,  ai:'shielded', base:'demonder' },
+  runner:   { hp:26,  spd:104,dmg:10, xp:5,  r:14, dh:56,  ai:'runner',   base:'minyar' },
 };
 
 const BOSS = { hp:48000, spd:40, dmg:45, r:66, xp:0, dh:190 };   // the Hungry King is no pushover
@@ -186,3 +191,93 @@ const UPGRADES = [
   { id:'impact',     icon:'🥊', name:'Heavy Impact',   desc:'+50% knockback on all hits',                   apply:m=>m.knockMul*=1.5 },
   { id:'secondwind', icon:'🕯️', name:'Second Wind',    desc:'Cheat death once — revive at half HP',         once:true, apply:m=>m.revive+=1 },
 ];
+
+// ---------- Meta-progression: the Shell Shrine ----------
+// Earn Shells from runs, spend on modest PERMANENT boons. Kept deliberately
+// small so the difficulty ladder still matters — these smooth the early game,
+// they don't trivialize it. apply() folds into G.mods at run start.
+const PERKS = [
+  { id:'hp',    icon:'❤️', name:'Sturdy Shell',  desc:'+8 starting max HP',        max:5, cost:l=>40 + l * 30,  apply:(m,l)=>m.hpBonus += 8 * l },
+  { id:'dmg',   icon:'💥', name:'Sharpened Kin', desc:'+4% damage',                max:5, cost:l=>50 + l * 40,  apply:(m,l)=>m.dmg *= 1 + 0.04 * l },
+  { id:'spd',   icon:'👟', name:'Fleet Footed',  desc:'+3% move speed',            max:3, cost:l=>45 + l * 35,  apply:(m,l)=>m.spd *= 1 + 0.03 * l },
+  { id:'xp',    icon:'📜', name:'Old Wisdom',     desc:'+6% XP gained',            max:3, cost:l=>45 + l * 35,  apply:(m,l)=>m.xpGain *= 1 + 0.06 * l },
+  { id:'magnet',icon:'🧲', name:'Gem Sense',      desc:'+12% pickup range',        max:3, cost:l=>35 + l * 25,  apply:(m,l)=>m.magnet *= 1 + 0.12 * l },
+  { id:'start', icon:'⛓', name:'Head Start',     desc:'Begin with 1 cage already broken', max:3, cost:l=>80 + l * 70, apply:()=>{} },
+  { id:'fortune',icon:'🎲', name:'Fortune',        desc:'+1 level-up reroll per run', max:3, cost:l=>60 + l * 55, apply:()=>{} },
+];
+const SHELLS_PER_SCORE = 500;   // 1 shell per this much score
+
+// ---------- Endless round narrative beats ----------
+// Shown when King Glob crawls back out for the next round. Index by round number
+// (clamped); each is a short escalating taunt to give endless mode a story arc.
+const ROUND_FLAVOR = [
+  '',  // round 0/1 unused (first boss uses its own banner)
+  '',
+  'The mountain splits. He remembers dying — and hates you for it.',
+  'Cracks race across the island. Glob returns wearing the dark like armor.',
+  'The sea pulls back in fear. Something older wakes beneath the King.',
+  'The sky bruises purple. Glob has stopped pretending to be alive.',
+  'Reality thins. Each death only makes the Hungry King hungrier.',
+  'The cages you broke rattle with laughter. He is legion now.',
+  'The Balance screams. You are the only thing still holding the line.',
+  'Time folds. Glob has been killing you in every world at once.',
+  'There is no round after this that has a name. Only you, and the end of him.',
+];
+const roundFlavor = r => ROUND_FLAVOR[Math.min(r, ROUND_FLAVOR.length - 1)] || 'The horde thickens. Hold the line.';
+
+// ---------- Achievements ----------
+// Checked at run end against a run context + lifetime save stats.
+const ACHIEVEMENTS = [
+  { id:'firstwin',  icon:'👑', name:'Regicide',        desc:'Defeat King Glob',                  test:c=>c.bossKills>=1 },
+  { id:'freeall',   icon:'⛓',  name:'Jailbreak',       desc:'Free all 24 Guardians in one run',  test:c=>c.freed>=24 },
+  { id:'ss',        icon:'🌟', name:'Transcendent',    desc:'Take a Guardian to Super Saiyan',   test:c=>c.maxTier>=4 },
+  { id:'endless5',  icon:'🌀', name:'Still Standing',  desc:'Reach endless round 5',             test:c=>c.round>=5 },
+  { id:'endless10', icon:'🔥', name:'Unrelenting',     desc:'Reach endless round 10',            test:c=>c.round>=10 },
+  { id:'solo',      icon:'🦸', name:'Lone Guardian',   desc:'Beat King Glob without possessing anyone', test:c=>c.bossKills>=1&&!c.possessed },
+  { id:'cataclysm', icon:'☄️', name:'Island Saviour',  desc:'Defeat King Glob on Cataclysm',     test:c=>c.bossKills>=1&&c.diff>=3 },
+  { id:'codex',     icon:'📖', name:'Full Codex',      desc:'Master all 24 Guardians to Super Saiyan', test:c=>c.codexComplete },
+  { id:'reaper',    icon:'☠️', name:'Reaper',          desc:'Slay 10,000 enemies (lifetime)',    test:c=>c.lifeKills>=10000 },
+  { id:'million',   icon:'💥', name:'Megaton',         desc:'Deal 1,000,000 damage (lifetime)',  test:c=>c.lifeDmg>=1000000 },
+];
+
+// ---------- Hero signature upgrades ----------
+// Two per Guardian, each modifying only THAT hero's weapon (via per-hero mods).
+// They appear in the level-up mystery pool once that Guardian is in play, and
+// are one-time (leave the pool after being taken). Mods: dmg/rate/area/speed
+// are multipliers; pierceAdd/countAdd/jumpsAdd are additive; exploadMul scales
+// explosion radius. rate<1 = faster.
+const HERO_UP = {
+  bo:            [ ['🌈','Prism Fan','Two extra rainbow feathers',{countAdd:2}], ['🎯','Piercing Prism','Feathers pierce +2 enemies',{pierceAdd:2}] ],
+  chocker:       [ ['☠️','Choking Cloud','+45% poison damage & area',{dmg:1.45,area:1.25}], ['💨','Wider Fumes','+35% reach & size',{area:1.35,speed:1.15}] ],
+  chomper:       [ ['🦈','Wider Jaws','+35% bite arc & reach',{area:1.35}], ['⚡','Double Bite','Chomps 40% faster',{rate:0.6}] ],
+  chunky:        [ ['🍌','Barrel Roll','+2 projectiles per throw',{countAdd:2}], ['🙌','Faster Hands','Throws 25% faster',{rate:0.75}] ],
+  cliggy:        [ ['🥚','Colossal Yolk','+40% blast size & +25% damage',{area:1.4,dmg:1.25}], ['🍳','Double Clutch','Lays a second egg',{countAdd:1}] ],
+  creeper:       [ ['👁️','Wide Stare','+45% beam width',{area:1.45}], ['🔴','Focused Stare','+45% beam damage',{dmg:1.45}] ],
+  diver:         [ ['🗡️','Skewer Volley','Pierces +3 more enemies',{pierceAdd:3}], ['💨','Terminal Velocity','+30% speed & +20% damage',{speed:1.3,dmg:1.2}] ],
+  fertle:        [ ['💥','Bigger Booms','+50% blast radius',{exploadMul:1.5,area:1.15}], ['🔥','Twin Shells','Fires a second shell',{countAdd:1}] ],
+  fixie:         [ ['❄️','Icicle Storm','+2 icicles per volley',{countAdd:2}], ['🧊','Deep Freeze','+35% damage',{dmg:1.35}] ],
+  flick:         [ ['🔥','Inferno Wake','+40% trail damage',{dmg:1.4}], ['🌋','Wider Blaze','+40% trail & shot area',{area:1.4}] ],
+  fygar:         [ ['🗡️','Fang Barrage','+2 fangs per throw',{countAdd:2}], ['⚡','Blur Strike','Throws 30% faster',{rate:0.7}] ],
+  gus:           [ ['🌀','Wider Coils','+40% crush radius',{area:1.4}], ['🐍','Crushing Grip','+50% crush damage',{dmg:1.5}] ],
+  'peeta-heater':[ ['♨️','Steam Barrage','+1 jet & +2 pierce',{countAdd:1,pierceAdd:2}], ['🔥','Scalding','+40% damage',{dmg:1.4}] ],
+  'roger-dodger':[ ['🪃','Twin Wings','Throws a second blade',{countAdd:1}], ['✨','Razor Wings','+45% damage',{dmg:1.45}] ],
+  sixter:        [ ['⭐','Shrapnel Cloud','+6 shards per burst',{countAdd:6}], ['💢','Sharper Stars','+35% damage',{dmg:1.35}] ],
+  skyjumper:     [ ['🌟','Stolen Constellation','+1 orbiting star',{countAdd:1}], ['💫','Wider Orbit','+30% orbit radius & size',{area:1.3}] ],
+  snapper:       [ ['🦀','Thunderclap','+4 shockwave bolts',{countAdd:4}], ['💥','Harder Clap','+40% damage',{dmg:1.4}] ],
+  stinger:       [ ['🔱','Longer Lance','+40% sweep reach',{area:1.4}], ['⚡','Rapid Drill','Sweeps 35% faster',{rate:0.65}] ],
+  swack:         [ ['🌊','Twin Doorwave','Throws a second wave',{countAdd:1}], ['🏄','Tidal Wall','+40% wave size',{area:1.4}] ],
+  waterwolf:     [ ['🌊','Full Tide','+4 tide slabs',{countAdd:4}], ['🐺','Heavier Tides','+40% damage',{dmg:1.4}] ],
+  whipper:       [ ['🦇','Echo Swarm','+2 homing shrieks',{countAdd:2}], ['🔊','Piercing Echo','+40% damage',{dmg:1.4}] ],
+  yellogen:      [ ['🔊','Double Screech','+1 bolt per screech',{countAdd:1}], ['💥','Shatterpoint','+40% damage',{dmg:1.4}] ],
+  yelp:          [ ['🔵','Fourth Orb','+1 orbiting orb',{countAdd:1}], ['📢','Bigger Orbs','+40% orb size & reach',{area:1.4}] ],
+  zappo:         [ ['⚡','Chain Reaction','Arc jumps to +2 more enemies',{jumpsAdd:2}], ['🌩️','Overvolt','+40% damage',{dmg:1.4}] ],
+};
+
+// Weapon evolution at Super Saiyan (tier 4): a permanent transform, applied by
+// archetype in fireWeapon so it's one rule per weapon type, not per hero.
+const EVO_NOTE = {
+  shot:  'pierces more & fires an echo shot', nova: '+40% projectiles',
+  orbit: '+2 orbiting bodies', aura: '+35% radius & damage',
+  chain: '+2 chain jumps', beam: '+40% width', trail: 'bigger, longer-lasting patches',
+  slash: 'wider, longer arc',
+};

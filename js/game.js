@@ -88,7 +88,7 @@ function moveVector() {
   return [mx, my];
 }
 
-const buzz = ms => { try { navigator.vibrate && navigator.vibrate(ms); } catch (e) {} };
+const buzz = ms => { if (prefs.haptics) try { navigator.vibrate && navigator.vibrate(ms); } catch (e) {} };
 
 // ---------------- Game state ----------------
 const G = {
@@ -105,8 +105,10 @@ let allies = [];               // fighters
 let cages = [];                // { heroIdx, x, y, hp, broken }
 let freedSet = new Set();      // heroIdx freed this run (incl. starter)
 let decor = [];
-let heroState = [];            // per-hero mastery: { dmg, tier, charge }
+let heroState = [];            // per-hero mastery: { dmg, tier, charge, kills, control }
+let heroMods = [];             // per-hero signature-upgrade mods (only that hero's weapon)
 let powerWaves = [];           // queued powershot projectile rings
+const freshHeroMod = () => ({ dmg: 1, rate: 1, area: 1, speed: 1, pierceAdd: 0, countAdd: 0, jumpsAdd: 0, exploadMul: 1 });
 
 function addDamage(src, amt) {
   if (src === undefined || src === null || G.over) return;
@@ -115,13 +117,28 @@ function addDamage(src, amt) {
   hs.dmg += amt;
   while (hs.tier < 4 && hs.dmg >= TIER_DMG[hs.tier + 1]) {
     hs.tier++;
-    banner(`${HEROES[src].name.toUpperCase()} → ${TIER_NAMES[hs.tier]}!`);
-    Sound.sfx.tierup();
-    buzz(30);
     const f = player.heroIdx === src ? player : allies.find(a => a.heroIdx === src);
-    if (f) {
-      spawnParts(f.x, f.y - 20, TIER_COLORS[hs.tier], 18, 170);
-      effects.push({ type: 'tierup', f, color: TIER_COLORS[hs.tier], t: 0, dur: 0.9 });
+    if (hs.tier === 4) {
+      // Super Saiyan: weapon evolution
+      const wtype = HEROES[src].weapons[0].type;
+      banner(`🌟 ${HEROES[src].name.toUpperCase()} IS SUPER SAIYAN — WEAPON EVOLVED!`);
+      banner(`✦ ${HEROES[src].name}'s ${HEROES[src].power.split(' — ')[0]} now ${EVO_NOTE[wtype] || 'transcends'}`);
+      Sound.sfx.powershot();
+      buzz(60);
+      if (f) { effects.push({ type: 'tierup', f, color: '#ffee58', t: 0, dur: 1.3 }); spawnParts(f.x, f.y - 20, '#ffee58', 30, 230); }
+      // first-ever Super Saiyan (any hero) is a milestone
+      try {
+        const save = loadSave();
+        if (!save.firstSS) { save.firstSS = 1; saveGame(save); banner('☀ THE FIRST GUARDIAN TRANSCENDS ☀'); }
+      } catch (e) {}
+    } else {
+      banner(`${HEROES[src].name.toUpperCase()} → ${TIER_NAMES[hs.tier]}!`);
+      Sound.sfx.tierup();
+      buzz(30);
+      if (f) {
+        spawnParts(f.x, f.y - 20, TIER_COLORS[hs.tier], 18, 170);
+        effects.push({ type: 'tierup', f, color: TIER_COLORS[hs.tier], t: 0, dur: 0.9 });
+      }
     }
   }
   if (hs.charge < 1) {
@@ -207,29 +224,42 @@ function nearestCage(x, y, maxD) {
 }
 
 // ---------------- Spawning ----------------
+// Endless scaling that CONVERGES instead of exploding: each round adds less than
+// the last, plateauing near a cap (hp ~4x, dmg ~3x, boss ~5x) so round 20 is a
+// real fight, not a spreadsheet wall.
+function conv(perStep, decay, round) {
+  return 1 + perStep * (1 - Math.pow(decay, Math.max(0, round - 1))) / (1 - decay);
+}
+const roundHpMul   = () => conv(ROUND_EHP, 0.85, G.round || 1);
+const roundDmgMul  = () => conv(ROUND_EDMG, 0.85, G.round || 1);
+const roundBossMul = () => conv(ROUND_BHP, 0.85, G.round || 1);
+
 function spawnEnemy(type, tier, x, y) {
   let e = null;
   for (let i = 0; i < MAX_ENEMIES; i++) if (!enemies[i].alive) { e = enemies[i]; e.id = i; break; }
   if (!e) return null;
   const def = ENEMIES[type];
-  const scale = type === 'minyar' ? 0.72 + Math.random() * 0.85 : 0.85 + Math.random() * 0.5;
+  const base = def.base || type;   // sprite family (new archetypes reuse art)
+  const small = base === 'minyar';
+  const scale = small ? 0.72 + Math.random() * 0.85 : 0.85 + Math.random() * 0.5;
   const timeMult = 1 + (G.time / 60) * 0.18;
   const tm = TIERS[tier].mult;
   const diff = G.diff || DIFFICULTIES[0];
-  const roundHp = 1 + ROUND_EHP * ((G.round || 1) - 1);     // endless escalation
-  const roundDmg = 1 + ROUND_EDMG * ((G.round || 1) - 1);
-  e.alive = true; e.type = type; e.tier = tier; e.scale = scale;
+  e.alive = true; e.type = type; e.base = base; e.ai = def.ai || 'chase'; e.tier = tier; e.scale = scale;
   e.x = x; e.y = y;
-  e.maxhp = def.hp * tm * Math.pow(scale, 1.7) * timeMult * diff.ehp * roundHp;
+  e.maxhp = def.hp * tm * Math.pow(scale, 1.7) * timeMult * diff.ehp * roundHpMul();
   e.hp = e.maxhp;
   e.spd = def.spd * (1.12 - scale * 0.18) * (0.9 + Math.random() * 0.25);
-  e.dmg = def.dmg * (1 + tier * 0.3) * scale * diff.edmg * roundDmg;
+  e.dmg = def.dmg * (1 + tier * 0.3) * scale * diff.edmg * roundDmgMul();
   e.lastSrc = undefined;
   e.xp = Math.max(1, Math.round(def.xp * (1 + tier * 0.9) * scale));
   e.r = def.r * scale;
+  e.dh = def.dh;
   e.slowT = 0; e.poisonT = 0; e.poisonDps = 0; e.poisonTick = 0;
   e.kbx = 0; e.kby = 0; e.flash = 0;
   e.wob = Math.random() * 6.28;
+  e.shootCd = e.ai === 'ranged' ? 1 + Math.random() : 0;   // spitter fire timer
+  e.fleeing = false;
   return e;
 }
 
@@ -245,22 +275,34 @@ function spawnWave(dt) {
     const x = Math.min(WORLD - 30, Math.max(30, player.x + Math.cos(a) * d));
     const y = Math.min(WORLD - 30, Math.max(30, player.y + Math.sin(a) * d));
     const tier = Math.max(0, maxTier - ((Math.random() ** 2) * 3 | 0));
+    // higher difficulties bring the nastier spawns forward
+    const early = (G.diff ? G.diff.id : 0) * 45;   // seconds earlier per difficulty tier
     let type = 'minyar';
     const r = Math.random();
-    if (t > 210 && r < Math.min(0.05, (t - 210) / 7000)) type = 'clubbo';
-    else if (t > 75 && r < Math.min(0.14, 0.025 + t / 2400)) type = 'demonder';
+    if (t > 210 - early && r < Math.min(0.05, (t - (210 - early)) / 7000)) type = 'clubbo';
+    else if (t > 130 - early && r < Math.min(0.07, (t - (130 - early)) / 4000)) type = 'warden';
+    else if (t > 95 - early && r < Math.min(0.09, (t - (95 - early)) / 3200)) type = 'runner';
+    else if (t > 60 - early && r < Math.min(0.11, (t - (60 - early)) / 2600)) type = 'spitter';
+    else if (t > 75 - early && r < Math.min(0.14, 0.025 + t / 2400)) type = 'demonder';
     spawnEnemy(type, tier, x, y);
-    // herald the first elite of each kind
-    if (type === 'demonder' && !G.sawDemonder) {
-      G.sawDemonder = true;
-      banner('A DEMONDER STALKS THE JUNGLE!');
-      Sound.playFile('assets/audio/enemies/demonder_entrance.wav', 0.85);
-    } else if (type === 'clubbo' && !G.sawClubbo) {
-      G.sawClubbo = true;
-      banner('CLUBBO! RUN. OR DON\'T.');
-      Sound.playFile('assets/audio/enemies/clubbo_entrance.wav', 0.9);
-    }
+    heraldEnemy(type);
   }
+}
+function heraldEnemy(type) {
+  const seen = G.seen || (G.seen = {});
+  if (seen[type]) return;
+  seen[type] = 1;
+  const heralds = {
+    demonder: ['A DEMONDER STALKS THE JUNGLE!', 'enemies/demonder_entrance.wav'],
+    clubbo:   ["CLUBBO! RUN. OR DON'T.", 'enemies/clubbo_entrance.wav'],
+    spitter:  ['SPITTERS! THEY STRIKE FROM RANGE', null],
+    warden:   ['A WARDEN — ARMORED, SLOW TO FALL', null],
+    runner:   ['RUNNERS! THEY BOLT AND BURST', null],
+  };
+  const h = heralds[type];
+  if (!h) return;
+  banner(h[0]);
+  if (h[1]) Sound.playFile('assets/audio/' + h[1], 0.85);
 }
 
 // ---------------- Damage ----------------
@@ -307,7 +349,15 @@ function killEnemy(e) {
   if (e.lastSrc != null && heroState[e.lastSrc]) heroState[e.lastSrc].kills++;
   dropGem(e.x, e.y, e.xp);
   const tint = `hsl(${TIERS[e.tier].hue},65%,55%)`;
-  spawnParts(e.x, e.y, tint, e.type === 'minyar' ? 6 : 12, 140);
+  spawnParts(e.x, e.y, tint, e.base === 'minyar' ? 6 : 12, 140);
+  // runner detonates on death — a small burst you have to step away from
+  if (e.ai === 'runner') {
+    const R = 62;
+    effects.push({ type: 'explo', x: e.x, y: e.y, r: R, t: 0, dur: 0.28, color: '#fff59d' });
+    spawnParts(e.x, e.y, '#fff59d', 12, 200);
+    if ((player.x - e.x) ** 2 + (player.y - e.y) ** 2 < R * R) hurtPlayer(e.dmg * 1.4);
+    Sound.sfx.nova();
+  }
   if (e.type === 'clubbo') {
     Sound.playFile('assets/audio/enemies/clubbo_defeat.wav', 0.85);
     G.shake = Math.max(G.shake, 6);
@@ -323,17 +373,18 @@ function damageEnemy(e, dmg, o) {
   if (e.isBoss) return damageBoss(dmg, o);
   if (e.isCage) return damageCage(e, dmg);
   if (!e.alive) return;
+  if (e.ai === 'shielded') dmg *= 0.55;           // warden: heavy armor — needs commitment or DoT
   e.hp -= dmg;
   e.flash = 0.09;
   if (o.src != null) e.lastSrc = o.src;
   addDamage(o.src, dmg);
   if (o.slow) e.slowT = Math.max(e.slowT, o.slow);
   if (o.poison) { e.poisonT = o.poisonT; e.poisonDps = Math.max(e.poisonDps, o.poison); }
-  if (o.knock) {
+  if (o.knock && e.ai !== 'shielded') {           // wardens don't flinch
     const kl = Math.hypot(o.kx, o.ky) || 1;
     e.kbx += o.kx / kl * o.knock; e.kby += o.ky / kl * o.knock;
   }
-  if (dmg >= 18 || e.type !== 'minyar') addFloater(e.x, e.y - e.r - 8, Math.round(dmg), '#fff');
+  if (dmg >= 18 || e.base !== 'minyar') addFloater(e.x, e.y - e.r - 8, Math.round(dmg), e.ai === 'shielded' ? '#b0bec5' : '#fff');
   if (e.hp <= 0) killEnemy(e);
 }
 
@@ -354,6 +405,7 @@ function killBoss(b) {
   b.alive = false;
   G.bossKills++;
   G.shake = 18;
+  hitStop(0.32);   // big dramatic freeze on the kill
   spawnParts(b.x, b.y, '#8bc34a', 60, 260);
   spawnParts(b.x, b.y, '#ffd54f', 40, 200);
   for (let i = 0; i < 6; i++)
@@ -367,7 +419,7 @@ function killBoss(b) {
   G.healPct(0.5);
   $('boss-hp-wrap').classList.add('hidden');
   banner(G.bossKills === 1 ? '👑 KING GLOB IS DOWN — BALITOPIA IS FREE!' : `👑 GLOB SLAIN ×${G.bossKills}!`);
-  banner(`🌀 ROUND ${G.round} — THE ISLAND TREMBLES AGAIN`);
+  banner(`🌀 ROUND ${G.round} — ${roundFlavor(G.round).toUpperCase()}`);
   buzz(60);
   Sound.playMusic('music/victory.mp3', { loop: false, vol: 0.6 });
   setTimeout(() => {
@@ -444,16 +496,29 @@ function spawnProj(o) {
 function fireWeapon(f, w, ws, isAlly, dt) {
   const m = G.mods;
   const src = f.heroIdx;
-  const rateMul = m.rate * (isAlly ? 1.25 : 1);
-  const dmgMul = m.dmg * (isAlly ? 0.55 * m.ally : 1) * heroDmgMul(src);
-  const areaMul = m.area;
+  const hm = heroMods[src] || freshHeroMod();
+  const evo = !!(heroState[src] && heroState[src].tier >= 4);   // Super Saiyan weapon evolution
+  const rateMul = m.rate * (isAlly ? 1.25 : 1) * hm.rate;
+  const dmgMul = m.dmg * (isAlly ? 0.55 * m.ally : 1) * heroDmgMul(src) * hm.dmg * (evo && w.type === 'aura' ? 1.35 : 1);
+  const evoArea = evo && (w.type === 'beam' || w.type === 'aura' || w.type === 'trail') ? 1.4 : 1;
+  const areaMul = m.area * hm.area * evoArea;
+  // effective per-shot params after signature mods + evolution
+  const eCount = (w.count || 1) + hm.countAdd
+    + (evo && w.type === 'nova' ? Math.ceil((w.count || 1) * 0.4) : 0)
+    + (evo && w.type === 'orbit' ? 2 : 0);
+  const ePierce = (w.pierce || 0) + hm.pierceAdd + (evo && w.type === 'shot' ? 2 : 0);
+  const eSpeedMul = hm.speed;
+  const eJumps = (w.jumps || 0) + hm.jumpsAdd + (evo && w.type === 'chain' ? 2 : 0);
+  const eExplodeMul = hm.exploadMul;
+  const eArcAdd = evo && w.type === 'slash' ? 0.5 : 0;
 
   if (w.type === 'orbit') {
     ws.ang += w.rot * dt;
     const R = w.radius * areaMul;
-    for (let i = 0; i < w.count; i++) {
+    while (ws.cds.length < eCount) ws.cds.push(0);   // new orbs from upgrades/evolution
+    for (let i = 0; i < eCount; i++) {
       ws.cds[i] -= dt;
-      const a = ws.ang + i / w.count * 6.283;
+      const a = ws.ang + i / eCount * 6.283;
       const ox = f.x + Math.cos(a) * R, oy = f.y + Math.sin(a) * R;
       if (ws.cds[i] <= 0) {
         let hit = false;
@@ -509,11 +574,11 @@ function fireWeapon(f, w, ws, isAlly, dt) {
     const t = nearestTarget(f.x, f.y, 700, true);
     if (!t) return;                     // hold fire until something's near
     ws.cd = interval;
-    for (let i = 0; i < w.count; i++) {
-      const a = i / w.count * 6.283 + Math.random() * 0.2;
+    for (let i = 0; i < eCount; i++) {
+      const a = i / eCount * 6.283 + Math.random() * 0.2;
       spawnProj({
-        x: f.x, y: f.y, vx: Math.cos(a) * w.speed * m.pspd, vy: Math.sin(a) * w.speed * m.pspd,
-        dmg: w.dmg * dmgMul, pierce: 1 + m.pierceBonus, size: w.size * areaMul, life: w.life * m.plife,
+        x: f.x, y: f.y, vx: Math.cos(a) * w.speed * m.pspd * eSpeedMul, vy: Math.sin(a) * w.speed * m.pspd * eSpeedMul,
+        dmg: w.dmg * dmgMul, pierce: 1 + m.pierceBonus + hm.pierceAdd, size: w.size * areaMul, life: w.life * m.plife,
         color: w.color, knock: (w.knock || 0) * m.knockMul, src,
       });
     }
@@ -541,7 +606,7 @@ function fireWeapon(f, w, ws, isAlly, dt) {
     let cur = target;
     const pts = [{ x: f.x, y: f.y }];
     const visited = new Set();
-    for (let j = 0; j <= w.jumps && cur; j++) {
+    for (let j = 0; j <= eJumps && cur; j++) {
       pts.push({ x: cur.x, y: cur.y });
       damageEnemy(cur, w.dmg * dmgMul * Math.pow(0.85, j), { src });
       if (cur.id !== undefined) visited.add(cur.id);
@@ -586,7 +651,7 @@ function fireWeapon(f, w, ws, isAlly, dt) {
   }
 
   if (w.type === 'slash') {
-    const R = w.radius * areaMul, half = w.arc / 2;
+    const R = w.radius * areaMul, half = (w.arc + eArcAdd) / 2;
     eachEnemyNear(f.x, f.y, R + 40, e => {
       const d2 = (e.x - f.x) ** 2 + (e.y - f.y) ** 2;
       if (d2 > (R + e.r) ** 2) return;
@@ -612,21 +677,21 @@ function fireWeapon(f, w, ws, isAlly, dt) {
         if (Math.abs(da) < half + 0.3) damageCage(c, w.dmg * dmgMul);
       }
     }
-    effects.push({ type: 'slash', x: f.x, y: f.y, ang, r: R, arc: w.arc, t: 0, dur: 0.18, color: w.color });
+    effects.push({ type: 'slash', x: f.x, y: f.y, ang, r: R, arc: w.arc + eArcAdd, t: 0, dur: 0.18, color: w.color });
     if (!isAlly) Sound.sfx.shoot();
     return;
   }
 
   // ----- shot -----
-  for (let i = 0; i < w.count; i++) {
+  for (let i = 0; i < eCount; i++) {
     let a = ang;
-    if (w.count > 1) a += (i - (w.count - 1) / 2) * (w.spread / Math.max(1, w.count - 1)) * 2;
+    if (eCount > 1) a += (i - (eCount - 1) / 2) * (w.spread / Math.max(1, eCount - 1)) * 2 + (w.spread ? 0 : (Math.random() - 0.5) * 0.12);
     else if (w.spread) a += (Math.random() - 0.5) * w.spread;
     spawnProj({
       x: f.x, y: f.y - 12,
-      vx: Math.cos(a) * w.speed * m.pspd, vy: Math.sin(a) * w.speed * m.pspd,
-      dmg: w.dmg * dmgMul, pierce: (w.pierce || 0) + m.pierceBonus, size: w.size * areaMul, life: w.life * m.plife,
-      color: w.color, rainbow: w.rainbow, homing: w.homing, boomerang: w.boomerang, explode: w.explode ? w.explode * areaMul : 0,
+      vx: Math.cos(a) * w.speed * m.pspd * eSpeedMul, vy: Math.sin(a) * w.speed * m.pspd * eSpeedMul,
+      dmg: w.dmg * dmgMul, pierce: ePierce + m.pierceBonus, size: w.size * areaMul, life: w.life * m.plife,
+      color: w.color, rainbow: w.rainbow, homing: w.homing, boomerang: w.boomerang, explode: w.explode ? w.explode * eExplodeMul * areaMul : 0,
       split: w.split, slow: w.slow, poison: w.poison ? w.poison * dmgMul / Math.max(1, w.dmg) * w.dmg : 0,
       poisonT: w.poisonT, knock: (w.knock || 0) * m.knockMul, owner: f, src,
     });
@@ -758,7 +823,24 @@ function updateEnemies(dt) {
       }
     }
 
-    if (dist > 1) { e.x += ddx / dist * sp * dt; e.y += ddy / dist * sp * dt; }
+    // ---- movement AI ----
+    let mvx = ddx, mvy = ddy, mvd = dist;
+    if (e.ai === 'ranged') {
+      // keep ~250px away and spit; back off if too close
+      const ideal = 250;
+      if (dist < ideal - 40) { mvx = -ddx; mvy = -ddy; }
+      else if (dist < ideal + 40) { mvx = -ddy; mvy = ddx; }   // strafe
+      e.shootCd -= dt;
+      if (e.shootCd <= 0 && dist < 520) {
+        e.shootCd = 1.8 + Math.random() * 0.8;
+        const ang = Math.atan2(ddy, ddx);
+        spawnEBullet(e.x, e.y, Math.cos(ang) * 210, Math.sin(ang) * 210, e.dmg, 8, 3.4);
+      }
+    } else if (e.ai === 'runner') {
+      if (e.hp < e.maxhp * 0.35) { e.fleeing = true; }
+      if (e.fleeing) { mvx = -ddx; mvy = -ddy; sp *= 1.35; }
+    }
+    if (mvd > 1) { const inv = 1 / (Math.hypot(mvx, mvy) || 1); e.vx0 = mvx * inv; e.vy0 = mvy * inv; e.x += e.vx0 * sp * dt; e.y += e.vy0 * sp * dt; }
     // knockback decay
     e.x += e.kbx * dt; e.y += e.kby * dt;
     e.kbx *= Math.pow(0.002, dt); e.kby *= Math.pow(0.002, dt);
@@ -791,13 +873,13 @@ function spawnBoss() {
   const a = Math.random() * 6.283;
   const diff = G.diff || DIFFICULTIES[0];
   const round = G.round || 1;
-  const hp = BOSS.hp * diff.bhp * (1 + ROUND_BHP * (round - 1));
+  const hp = BOSS.hp * diff.bhp * roundBossMul();
   G.boss = {
     alive: true, isBoss: true,
     x: Math.min(WORLD - 200, Math.max(200, player.x + Math.cos(a) * 640)),
     y: Math.min(WORLD - 200, Math.max(200, player.y + Math.sin(a) * 640)),
-    hp, maxhp: hp, r: BOSS.r, spd: BOSS.spd, dmg: BOSS.dmg * diff.edmg * (1 + ROUND_EDMG * (round - 1)),
-    slowT: 0, flash: 0, wob: 0, enraged: round > 1,   // returning Glob starts angry
+    hp, maxhp: hp, r: BOSS.r, spd: BOSS.spd, dmg: BOSS.dmg * diff.edmg * roundDmgMul(),
+    slowT: 0, flash: 0, wob: 0, enraged: round > 1, frenzy: false,   // returning Glob starts angry
     volleyCd: 4, summonCd: 8, slamCd: 12,
   };
   if (G.boss.enraged) G.boss.spd *= 1.3;
@@ -813,54 +895,71 @@ function updateBoss(dt) {
   const b = G.boss;
   if (!b || !b.alive) return;
   b.flash -= dt; b.slowT -= dt; b.wob += dt;
-  if (!b.enraged && b.hp < b.maxhp / 2) {
-    b.enraged = true;
-    b.spd *= 1.3;
+  const round = G.round || 1;
+  const edmg = G.diff ? G.diff.edmg : 1;
+  // phase 2 (enrage) at 50%, phase 3 (frenzy) at 20%
+  if (!b.enraged && b.hp < b.maxhp * 0.5) {
+    b.enraged = true; b.spd *= 1.3;
     Sound.playFile('assets/audio/enemies/glob_enrage.wav', 0.95);
-    banner('KING GLOB IS FURIOUS!');
-    G.shake = Math.max(G.shake, 10);
+    banner('KING GLOB IS FURIOUS!'); G.shake = Math.max(G.shake, 10);
+  }
+  if (!b.frenzy && b.hp < b.maxhp * 0.2) {
+    b.frenzy = true; b.spd *= 1.2;
+    Sound.playFile('assets/audio/enemies/glob_enrage.wav', 1);
+    banner('👑 KING GLOB — FINAL FRENZY 👑'); G.shake = Math.max(G.shake, 14);
   }
   const dx = player.x - b.x, dy = player.y - b.y;
   const d = Math.hypot(dx, dy) || 1;
-  const sp = b.spd * (b.slowT > 0 ? 0.6 : 1);
+  // in frenzy he stops chasing and zones from range, forcing you to reposition
+  const chase = b.frenzy ? 0.35 : 1;
+  const sp = b.spd * (b.slowT > 0 ? 0.6 : 1) * chase;
   b.x += dx / d * sp * dt; b.y += dy / d * sp * dt;
 
   if (d < b.r + 16) hurtPlayer(b.dmg);
 
   b.volleyCd -= dt;
   if (b.volleyCd <= 0) {
-    b.volleyCd = (b.enraged ? 3.2 : 5) + Math.random() * 2;
+    b.volleyCd = (b.frenzy ? 2 : b.enraged ? 3.2 : 5) + Math.random() * 2;
     const base = Math.atan2(dy, dx);
-    for (let i = 0; i < 10; i++) {
-      const a = base + (i - 4.5) * 0.14;
-      for (let k = 0; k < ebullets.length; k++) {
-        const eb = ebullets[k];
-        if (eb.alive) continue;
-        eb.alive = true; eb.x = b.x; eb.y = b.y - 40;
-        eb.vx = Math.cos(a) * 240; eb.vy = Math.sin(a) * 240;
-        eb.dmg = 22; eb.size = 10; eb.life = 3.2; eb.t = 0;
-        break;
-      }
+    const spread = b.frenzy ? 14 : 10;
+    for (let i = 0; i < spread; i++) {
+      const a = base + (i - (spread - 1) / 2) * 0.14;
+      spawnEBullet(b.x, b.y - 40, Math.cos(a) * 240, Math.sin(a) * 240, 22 * edmg, 10, 3.2);
     }
+    // round 3+: a second radial ring; round 5+: a spiral burst
+    if (round >= 3) for (let i = 0; i < 12; i++) { const a = b.wob + i / 12 * 6.283; spawnEBullet(b.x, b.y - 40, Math.cos(a) * 170, Math.sin(a) * 170, 18 * edmg, 8, 3.6); }
     Sound.sfx.nova();
   }
   b.summonCd -= dt;
   if (b.summonCd <= 0) {
-    b.summonCd = 9;
-    for (let i = 0; i < 7; i++) {
+    b.summonCd = b.frenzy ? 6 : 9;
+    const kinds = round >= 4 ? ['minyar', 'spitter', 'runner'] : ['minyar'];
+    for (let i = 0; i < (b.frenzy ? 9 : 7); i++) {
       const a = Math.random() * 6.283;
-      spawnEnemy('minyar', Math.min(5, 2 + (Math.random() * 4 | 0)), b.x + Math.cos(a) * 110, b.y + Math.sin(a) * 110);
+      spawnEnemy(kinds[(Math.random() * kinds.length) | 0], Math.min(5, 2 + (Math.random() * 4 | 0)), b.x + Math.cos(a) * 110, b.y + Math.sin(a) * 110);
     }
   }
   b.slamCd -= dt;
-  if (b.slamCd <= 0 && d < 420) {
-    // ground-target the PLAYER's position — a readable, dodgeable AoE
-    b.slamCd = b.enraged ? 8 : 11;
-    telegraphs.push({ x: player.x, y: player.y, r: 165, t: 0, dur: 1.1, dmg: 38 * (G.diff ? G.diff.edmg : 1) });
-    Sound.sfx.nova();
+  if (b.slamCd <= 0 && (d < 420 || b.frenzy)) {
+    b.slamCd = b.frenzy ? 5 : b.enraged ? 8 : 11;
+    // frenzy: two slams — one on you, one predicting where you're headed
+    telegraphs.push({ x: player.x, y: player.y, r: 165, t: 0, dur: 1.1, dmg: 38 * edmg });
+    if (b.frenzy) {
+      const [mvx, mvy] = moveVector();
+      telegraphs.push({ x: player.x + mvx * 180, y: player.y + mvy * 180, r: 150, t: 0, dur: 1.2, dmg: 38 * edmg });
+    }
+    Sound.playFile('assets/audio/sfx/glob_slam.wav', 0.85);
   }
 }
 
+function spawnEBullet(x, y, vx, vy, dmg, size, life) {
+  for (const eb of ebullets) {
+    if (eb.alive) continue;
+    eb.alive = true; eb.x = x; eb.y = y - 20; eb.vx = vx; eb.vy = vy;
+    eb.dmg = dmg; eb.size = size; eb.life = life; eb.t = 0;
+    return;
+  }
+}
 function updateEbullets(dt) {
   for (const eb of ebullets) {
     if (!eb.alive) continue;
@@ -998,9 +1097,12 @@ function frame(ts) {
   requestAnimationFrame(frame);
   const dt = Math.min(0.05, (ts - last) / 1000 || 0.016);
   last = ts;
+  // hit-stop: freeze the sim for a few frames on impactful hits so they land with weight
+  if (G.hitStop > 0 && G.running && !G.over) { G.hitStop -= dt; render(0); return; }
   if (G.running && !G.over && window.innerWidth > window.innerHeight) update(dt);
   render(dt);
 }
+function hitStop(dur) { if (prefs.motion) G.hitStop = Math.max(G.hitStop || 0, dur); }
 
 function update(dt) {
   G.time += dt;
@@ -1073,13 +1175,14 @@ function render(dt) {
   ctx.fillRect(0, 0, cw, ch);
   if (!player) return;
 
-  const shx = G.shake ? (Math.random() - 0.5) * G.shake : 0;
-  const shy = G.shake ? (Math.random() - 0.5) * G.shake : 0;
+  const shakeMul = prefs.motion ? 1 : 0.25;   // reduced-motion softens (not kills) shake
+  const shx = G.shake ? (Math.random() - 0.5) * G.shake * shakeMul : 0;
+  const shy = G.shake ? (Math.random() - 0.5) * G.shake * shakeMul : 0;
   const camX = G.cam.x - viewW / 2 + shx, camY = G.cam.y - VIEW_H / 2 + shy;
   ctx.setTransform(dpr * viewScale, 0, 0, dpr * viewScale, -camX * dpr * viewScale, -camY * dpr * viewScale);
 
   // ---- ground ----
-  const tile = Sprites.get('ground');
+  const tile = Sprites.get('ground_' + (G.region ? G.region.split('-')[1] : 'land'));
   const ts = 256;
   const x0 = Math.floor(camX / ts) * ts, y0 = Math.floor(camY / ts) * ts;
   for (let tx = x0; tx < camX + viewW; tx += ts)
@@ -1154,25 +1257,74 @@ function render(dt) {
   for (let i = 0; i < MAX_ENEMIES; i++) {
     const e = enemies[i];
     if (!e.alive || !onScreen(e.x, e.y, 90)) continue;
-    const spr = Sprites.get(e.type + e.tier);
-    const h = ENEMIES[e.type].dh * e.scale;
+    const spr = Sprites.get(e.base + e.tier);
+    const h = e.dh * e.scale;
     const w = spr.width / spr.height * h;
     shadow(e.x, e.y + 2, w * 0.9);
+    const cy = e.y - h / 2 + 6;
+    // runner: motion streaks behind
+    if (e.ai === 'runner') {
+      const ma = Math.atan2(e.vy0 || 0, e.vx0 || 0);
+      ctx.globalAlpha = 0.3; ctx.strokeStyle = '#fff59d'; ctx.lineWidth = 2;
+      for (let s = 1; s <= 2; s++) { ctx.beginPath(); ctx.moveTo(e.x - Math.cos(ma) * s * 8, cy - Math.sin(ma) * s * 8); ctx.lineTo(e.x - Math.cos(ma) * (s * 8 + 7), cy - Math.sin(ma) * (s * 8 + 7)); ctx.stroke(); }
+      ctx.globalAlpha = 1;
+    }
     const squash = 1 + Math.sin(G.time * 9 + e.wob) * 0.05;
     ctx.drawImage(spr, e.x - w / 2, e.y - h * squash + 6, w, h * squash);
+    // warden: a shield arc facing the player (front-armored)
+    if (e.ai === 'shielded') {
+      const fa = Math.atan2(player.y - e.y, player.x - e.x);
+      ctx.strokeStyle = '#b0bec5'; ctx.lineWidth = 3.5;
+      ctx.globalAlpha = 0.85;
+      ctx.beginPath(); ctx.arc(e.x, cy, e.r + 6, fa - 0.9, fa + 0.9); ctx.stroke();
+      ctx.globalAlpha = 1;
+    }
+    // spitter: a glowing muzzle marker so ranged threats read at a glance
+    if (e.ai === 'ranged') {
+      ctx.globalAlpha = 0.6 + Math.sin(G.time * 8 + e.wob) * 0.3;
+      ctx.fillStyle = '#b2ff59';
+      ctx.beginPath(); ctx.arc(e.x, cy - e.r * 0.3, 3.5, 0, 7); ctx.fill();
+      ctx.globalAlpha = 1;
+    }
     if (e.flash > 0) {
       ctx.globalAlpha = 0.55; ctx.fillStyle = '#fff';
       ctx.beginPath(); ctx.arc(e.x, e.y - h / 2 + 6, e.r, 0, 7); ctx.fill();
       ctx.globalAlpha = 1;
     }
     if (e.poisonT > 0) {
+      // poison: a bubbling green miasma with rising blips
       ctx.globalAlpha = 0.4; ctx.fillStyle = '#8bc34a';
       ctx.beginPath(); ctx.arc(e.x, e.y - h / 2 + 6, e.r * 0.6, 0, 7); ctx.fill();
+      ctx.globalAlpha = 0.7; ctx.fillStyle = '#c5e1a5';
+      for (let k = 0; k < 3; k++) {
+        const ph = (G.time * 1.6 + k * 0.4 + e.wob) % 1;
+        ctx.beginPath(); ctx.arc(e.x + Math.sin(ph * 6 + k) * e.r * 0.5, e.y - h * 0.4 - ph * e.r, (1 - ph) * 2.4, 0, 7); ctx.fill();
+      }
+      ctx.globalAlpha = 1;
+    }
+    if (e.slowT > 0) {
+      // frost: pale blue rime + a few crystal spikes so chilled foes read instantly
+      const cy2 = e.y - h / 2 + 6;
+      ctx.globalAlpha = 0.28; ctx.fillStyle = '#b3e5fc';
+      ctx.beginPath(); ctx.arc(e.x, cy2, e.r * 0.9, 0, 7); ctx.fill();
+      ctx.globalAlpha = 0.85; ctx.strokeStyle = '#e1f5fe'; ctx.lineWidth = 1.5;
+      for (let k = 0; k < 4; k++) {
+        const a = k / 4 * 6.283 + e.wob, ix = e.x + Math.cos(a) * e.r * 0.8, iy = cy2 + Math.sin(a) * e.r * 0.8;
+        ctx.beginPath(); ctx.moveTo(ix, iy); ctx.lineTo(ix + Math.cos(a) * 4, iy + Math.sin(a) * 4); ctx.stroke();
+      }
       ctx.globalAlpha = 1;
     }
     if (e.type !== 'minyar' && e.hp < e.maxhp) {
       ctx.fillStyle = 'rgba(0,0,0,.5)'; ctx.fillRect(e.x - 20, e.y - h - 4, 40, 5);
       ctx.fillStyle = '#ef5350'; ctx.fillRect(e.x - 19, e.y - h - 3, 38 * Math.max(0, e.hp / e.maxhp), 3);
+    }
+    // colorblind danger pips: redundant non-color cue for power tier (0 pips = safest)
+    if (prefs.colorblind && e.tier > 0) {
+      const py = e.y - h * squash + 2, px = e.x - (e.tier - 1) * 3;
+      for (let k = 0; k < e.tier; k++) {
+        ctx.fillStyle = '#000'; ctx.fillRect(px + k * 6 - 1, py - 1, 5, 5);
+        ctx.fillStyle = '#fff'; ctx.fillRect(px + k * 6, py, 3, 3);
+      }
     }
   }
 
@@ -1394,6 +1546,45 @@ function render(dt) {
     ctx.fillStyle = vg;
     ctx.fillRect(0, 0, cw, ch);
   }
+
+  // ---- minimap (screen space, bottom-left) ----
+  if (G.running && !G.over && prefs.minimap) drawMinimap();
+}
+
+function drawMinimap() {
+  const size = Math.round(Math.min(cw, ch) * 0.2);   // scales with viewport
+  const pad = 10, mx = pad, my = ch - size - pad;
+  const s = size / WORLD;
+  ctx.save();
+  ctx.globalAlpha = 0.72;
+  ctx.fillStyle = 'rgba(6,26,18,.85)';
+  ctx.fillRect(mx, my, size, size);
+  ctx.strokeStyle = 'rgba(255,255,255,.25)'; ctx.lineWidth = 1;
+  ctx.strokeRect(mx + 0.5, my + 0.5, size, size);
+  const px = (wx) => mx + wx * s, py = (wy) => my + wy * s;
+  // unbroken cages
+  ctx.fillStyle = '#ffd54f';
+  for (const c of cages) {
+    if (c.broken) continue;
+    ctx.fillRect(px(c.x) - 1.5, py(c.y) - 1.5, 3, 3);
+  }
+  // boss
+  if (G.boss && G.boss.alive) {
+    ctx.fillStyle = '#ff5252';
+    const bx = px(G.boss.x), by = py(G.boss.y);
+    ctx.beginPath(); ctx.arc(bx, by, 3.5 + Math.sin(G.time * 6) * 1, 0, 7); ctx.fill();
+  }
+  // allies
+  ctx.fillStyle = 'rgba(129,212,250,.9)';
+  for (const al of allies) ctx.fillRect(px(al.x) - 1, py(al.y) - 1, 2, 2);
+  // player
+  ctx.fillStyle = '#fff';
+  const ppx = px(player.x), ppy = py(player.y);
+  ctx.beginPath(); ctx.arc(ppx, ppy, 2.6, 0, 7); ctx.fill();
+  ctx.strokeStyle = 'rgba(255,213,79,.9)'; ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.arc(ppx, ppy, 4.5, 0, 7); ctx.stroke();
+  ctx.restore();
+  ctx.globalAlpha = 1;
 }
 
 // ---------------- HUD ----------------
@@ -1525,6 +1716,7 @@ function possess(idx) {
   if (G.over || idx === player.heroIdx || !freedSet.has(idx)) return;
   const ai = allies.findIndex(a => a.heroIdx === idx);
   if (ai < 0) return;
+  G.possessedOther = true;   // for the 'Lone Guardian' achievement
   const al = allies[ai];
   const hpFrac = player.hp / maxHP();
   // souls swap bodies: control moves to the ally's body, old body keeps fighting
@@ -1573,6 +1765,7 @@ function powershot() {
 
   effects.push({ type: 'shock', x: player.x, y: player.y, r: R, t: 0, dur: 0.5, color: hero.accent });
   G.flash = 0.4;
+  hitStop(0.08);   // brief punch of weight as the shockwave lands
   G.shake = Math.max(G.shake, 12);
   player.iv = Math.max(player.iv, 1.2);
   Sound.sfx.powershot();
@@ -1605,41 +1798,90 @@ function updatePowerWaves(dt) {
   }
 }
 
+// Build a signature-upgrade card object from HERO_UP data for a given hero.
+function heroUpgradeCard(heroIdx, slot) {
+  const [icon, name, desc, mod] = HERO_UP[HEROES[heroIdx].id][slot];
+  return {
+    id: `hero_${heroIdx}_${slot}`, icon, name: `${HEROES[heroIdx].name}: ${name}`, desc, once: true, hero: heroIdx,
+    apply: () => {
+      const hmod = heroMods[heroIdx];
+      for (const k in mod) {
+        if (k === 'rate') hmod.rate *= mod.rate;
+        else if (k === 'dmg' || k === 'area' || k === 'speed' || k === 'exploadMul') hmod[k] *= mod[k];
+        else hmod[k] += mod[k];   // pierceAdd / countAdd / jumpsAdd
+      }
+    },
+  };
+}
+// Assemble the level-up draw pool: generic upgrades + signature upgrades for any
+// freed Guardian, biased so the Guardian you're piloting shows up more.
+function levelUpPool() {
+  const taken = G.mods.taken;
+  const pool = UPGRADES.filter(u => !(u.once && taken[u.id])).map(u => ({ ...u }));
+  for (const idx of freedSet) {
+    if (!HERO_UP[HEROES[idx].id]) continue;
+    for (let s = 0; s < 2; s++) {
+      const c = heroUpgradeCard(idx, s);
+      if (!taken[c.id]) { if (idx === player.heroIdx) pool.push(c, c); else pool.push(c); }  // double-weight your hero
+    }
+  }
+  return pool;
+}
 // ---------------- Level up: 3 face-down mystery cards ----------------
+function rollLevelUpCards() {
+  const pool = levelUpPool();
+  const chosen = [], seen = new Set();
+  while (chosen.length < 3 && pool.length) {
+    const pick = pool.splice((Math.random() * pool.length) | 0, 1)[0];
+    if (seen.has(pick.id)) continue;   // don't offer the same card twice (double-weighting can dup)
+    seen.add(pick.id); chosen.push(pick);
+  }
+  return chosen;
+}
+function closeLevelUp() {
+  G.pendingLv--;
+  $('screen-levelup').classList.add('hidden');
+  if (G.pendingLv > 0) showLevelUp();
+  else if (!G.over) G.running = true;
+}
 function showLevelUp() {
   G.running = false;
   const row = $('upgrade-row');
   row.innerHTML = '';
-  const pool = UPGRADES.filter(u => !(u.once && G.mods.taken[u.id]));
+  const chosen = rollLevelUpCards();
   let picked = false;
-  for (let i = 0; i < 3 && pool.length; i++) {
-    const pick = pool.splice((Math.random() * pool.length) | 0, 1)[0];
-    const card = document.createElement('div');
-    card.className = 'upgrade-card mystery';
-    card.innerHTML =
-      `<div class="mc-inner">
-         <div class="mc-face mc-front"><span>?</span></div>
-         <div class="mc-face mc-back">
-           <div class="uc-icon">${pick.icon}</div><h3>${pick.name}</h3><p>${pick.desc}</p>
-         </div>
-       </div>`;
-    card.addEventListener('pointerdown', () => {
-      if (picked) return;
-      picked = true;
-      Sound.sfx.uiClick();
-      card.classList.add('flipped');
-      row.querySelectorAll('.upgrade-card').forEach(c => { if (c !== card) c.classList.add('faded'); });
-      if (pick.once) G.mods.taken[pick.id] = true;
-      pick.apply(G.mods, G);
-      setTimeout(() => {
-        G.pendingLv--;
-        $('screen-levelup').classList.add('hidden');
-        if (G.pendingLv > 0) showLevelUp();
-        else if (!G.over) G.running = true;
-      }, 850);
-    });
-    row.appendChild(card);
-  }
+  const renderCards = cards => {
+    row.innerHTML = '';
+    for (const pick of cards) {
+      const card = document.createElement('div');
+      card.className = 'upgrade-card mystery' + (pick.hero !== undefined ? ' signature' : '');
+      card.innerHTML =
+        `<div class="mc-inner">
+           <div class="mc-face mc-front"><span>?</span></div>
+           <div class="mc-face mc-back">
+             ${pick.hero !== undefined ? '<div class="mc-sig">SIGNATURE</div>' : ''}
+             <div class="uc-icon">${pick.icon}</div><h3>${pick.name}</h3><p>${pick.desc}</p>
+           </div>
+         </div>`;
+      card.addEventListener('pointerdown', () => {
+        if (picked) return;
+        picked = true;
+        Sound.sfx.uiClick();
+        card.classList.add('flipped');
+        row.querySelectorAll('.upgrade-card').forEach(c => { if (c !== card) c.classList.add('faded'); });
+        if (pick.once) G.mods.taken[pick.id] = true;
+        pick.apply(G.mods, G);
+        setTimeout(closeLevelUp, 850);
+      });
+      row.appendChild(card);
+    }
+  };
+  renderCards(chosen);
+  // reroll / skip controls
+  const rerollN = $('lu-reroll-n');
+  const rerollBtn = $('btn-lu-reroll');
+  if (rerollN) rerollN.textContent = '×' + G.rerolls;
+  if (rerollBtn) rerollBtn.classList.toggle('spent', G.rerolls <= 0);
   $('screen-levelup').classList.remove('hidden');
 }
 
@@ -1672,23 +1914,56 @@ function closeRoster() {
   if (!G.over && $('screen-levelup').classList.contains('hidden')) G.running = true;
 }
 
+// ---------------- Daily challenge ----------------
+// A date-seeded run with a fixed hero / difficulty / region / cage layout, so
+// everyone plays the same setup each day and races a shared-format leaderboard.
+function mulberry32(seed) {
+  return function () {
+    seed |= 0; seed = seed + 0x6D2B79F5 | 0;
+    let t = Math.imul(seed ^ seed >>> 15, 1 | seed);
+    t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+    return ((t ^ t >>> 14) >>> 0) / 4294967296;
+  };
+}
+const dayKey = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
+function dailyRng() { const k = dayKey(); let s = 0; for (let i = 0; i < k.length; i++) s = (s * 31 + k.charCodeAt(i)) | 0; return mulberry32(s); }
+function dailySetup() {
+  const r = dailyRng();
+  return { hero: (r() * HEROES.length) | 0, diff: (r() * 3) | 0, region: ['region-land', 'region-sea', 'region-sky'][(r() * 3) | 0], cageRot: r() * 6.283 };
+}
+function startDaily() {
+  enterApp(); Sound.sfx.uiClick();
+  const s = dailySetup();
+  selectedHero = s.hero; selectedDiff = s.diff;
+  MENU_SCREENS.forEach(id => $(id).classList.add('hidden'));
+  newGame(s.hero, s.diff, s);
+}
+
 // ---------------- Game flow ----------------
-function newGame(heroIdx, diffIdx) {
+function newGame(heroIdx, diffIdx, daily) {
   G.running = true; G.over = false; G.victory = false; G.pendingLv = 0;
   G.time = 0; G.kills = 0; G.level = 1; G.xp = 0; G.xpNext = 10;
-  G.spawnAcc = 0; G.boss = null; G.bossWarned = false; G.shake = 0;
-  G.sawDemonder = false; G.sawClubbo = false;
+  G.spawnAcc = 0; G.boss = null; G.bossWarned = false; G.shake = 0; G.hitStop = 0;
+  G.seen = {};
   G.flash = 0; G.hurtFlash = 0; G.powerHintShown = false;
+  G.daily = daily || null;
   G.diff = DIFFICULTIES[Math.max(0, Math.min(DIFFICULTIES.length - 1, diffIdx | 0))];
   G.startHero = heroIdx;
+  G.possessedOther = false;
   G.round = 1; G.bossKills = 0; G.nextBossAt = BOSS_TIME;
+  G.rerolls = 3 + (daily ? 0 : ((loadSave().perks || {}).fortune || 0));
   heroState = HEROES.map(() => ({ dmg: 0, tier: 0, charge: 0, kills: 0, control: 0 }));
+  heroMods = HEROES.map(freshHeroMod);
   powerWaves = [];
   G.mods = {
     dmg: 1, rate: 1, spd: 1, hpBonus: 0, ally: 1, magnet: 1, regen: 0, area: 1,
     pierceBonus: 0, pspd: 1, plife: 1, chargeMul: 1, xpGain: 1, knockMul: 1, revive: 0,
     taken: {},   // `once` upgrades leave the pool after this
   };
+  // permanent Shell Shrine perks (daily challenge ignores them for fairness)
+  const perks = daily ? {} : (loadSave().perks || {});
+  for (const p of PERKS) { const lv = perks[p.id] || 0; if (lv > 0) p.apply(G.mods, lv); }
+  G.headStart = daily ? 0 : (perks.start || 0);
 
   for (const e of enemies) e.alive = false;
   for (const p of projs) p.alive = false;
@@ -1703,12 +1978,14 @@ function newGame(heroIdx, diffIdx) {
   player.hp = maxHP(); player.iv = 1.5;
   G.cam.x = player.x; G.cam.y = player.y;
 
-  // cages: golden spiral around spawn
+  // cages: golden spiral around spawn (daily uses a fixed rotation so the
+  // layout is identical for everyone that day)
+  const cageRot = daily ? daily.cageRot : Math.random() * 6.283;
   cages = [];
   let ci = 0;
   for (let i = 0; i < HEROES.length; i++) {
     if (i === heroIdx) continue;
-    const a = ci * 2.39996 + Math.random() * 0.3;
+    const a = cageRot + ci * 2.39996;
     const d = 460 + ci * 82;
     cages.push({
       heroIdx: i, isCage: true,
@@ -1736,15 +2013,21 @@ function newGame(heroIdx, diffIdx) {
   $('screen-select').classList.add('hidden');
   $('screen-over').classList.add('hidden');
   $('hud').classList.remove('hidden');
+  // Head Start perk: free the nearest N cages immediately
+  for (let n = 0; n < (G.headStart || 0) && cages.length; n++) {
+    const c = cages.filter(c => !c.broken).sort((a, b) =>
+      ((a.x - player.x) ** 2 + (a.y - player.y) ** 2) - ((b.x - player.x) ** 2 + (b.y - player.y) ** 2))[0];
+    if (c) { c.broken = true; allies.push(makeFighter(c.heroIdx, player.x, player.y)); freedSet.add(c.heroIdx); }
+  }
   updateHudCounts();
   rebuildStrip();
   try {
     const save = loadSave();
     save.lastHero = heroIdx;
-    localStorage.setItem('balitopia', JSON.stringify(save));
+    saveGame(save);
   } catch (e) {}
   Sound.stopPreview();
-  G.region = ['region-land', 'region-sea', 'region-sky'][(Math.random() * 3) | 0];
+  G.region = daily ? daily.region : ['region-land', 'region-sea', 'region-sky'][(Math.random() * 3) | 0];
   Sound.playMusic(`music/${G.region}.mp3`);
   Sound.playFile(`assets/audio/heroes/${HEROES[heroIdx].id}_entrance.wav`, 0.9);
   bannerQ.length = 0;
@@ -1754,9 +2037,9 @@ function newGame(heroIdx, diffIdx) {
     const save = loadSave();
     if (!save.seenHints) {
       save.seenHints = 1;
-      localStorage.setItem('balitopia', JSON.stringify(save));
-      banner('LEFT THUMB MOVES · RIGHT THUMB AIMS');
-      banner('⛓ FOLLOW THE GOLD ARROW TO A CAGE');
+      saveGame(save);
+      banner('◀ DRAG LEFT SIDE TO MOVE · TAP RIGHT SIDE FOR POWERSHOT ⚡');
+      banner('⛓ FOLLOW THE GOLD ARROW TO A CAGE — FREE YOUR KIN');
     }
   } catch (e) {}
 }
@@ -1804,10 +2087,44 @@ function saveRun(score) {
     save.bestScore = Math.max(save.bestScore || 0, score);
     save.bestKills = Math.max(save.bestKills || 0, G.kills);
     save.wins = (save.wins || 0) + (G.victory ? 1 : 0);
-    save.lastHero = G.startHero; save.lastDiff = G.diff.id;
-    localStorage.setItem('balitopia', JSON.stringify(save));
+    if (!G.daily) { save.lastHero = G.startHero; save.lastDiff = G.diff.id; }
+    // daily challenge best (keyed by date)
+    if (G.daily) {
+      const dk = dayKey();
+      save.daily = save.daily || {};
+      save.daily[dk] = Math.max(save.daily[dk] || 0, score);
+      // keep only the last ~10 days
+      const keys = Object.keys(save.daily).sort();
+      while (keys.length > 10) delete save.daily[keys.shift()];
+    }
+    // shells (meta currency)
+    G.shellsEarned = Math.floor(score / SHELLS_PER_SCORE);
+    save.shells = (save.shells || 0) + G.shellsEarned;
+    // lifetime stats
+    const st = save.stats || (save.stats = { kills: 0, dmg: 0 });
+    st.kills += G.kills;
+    st.dmg += heroState.reduce((s, hs) => s + hs.dmg, 0);
+    // achievements
+    G.newAch = checkAchievements(save);
+    saveGame(save);
   } catch (e) {}
   return rank;
+}
+
+function checkAchievements(save) {
+  const ach = save.ach || (save.ach = {});
+  const codexComplete = HEROES.every(h => (save.mastery[h.id] || 0) >= 4);
+  const ctx = {
+    bossKills: G.bossKills, freed: freedSet.size, round: G.round, diff: G.diff.id,
+    maxTier: heroState.reduce((m, hs) => Math.max(m, hs.tier), 0),
+    possessed: G.possessedOther, codexComplete,
+    lifeKills: save.stats.kills, lifeDmg: save.stats.dmg,
+  };
+  const unlocked = [];
+  for (const a of ACHIEVEMENTS) {
+    if (!ach[a.id] && a.test(ctx)) { ach[a.id] = Date.now(); unlocked.push(a); }
+  }
+  return unlocked;
 }
 
 function buildStatsScreen(rank) {
@@ -1816,14 +2133,19 @@ function buildStatsScreen(rank) {
     G.bossKills > 1 ? `GLOB SLAIN ×${G.bossKills}!` : won ? 'BALITOPIA IS FREE!' : 'THE TIDE TAKES YOU';
   $('over-title').style.color = won ? '#ffd54f' : '#ef9a9a';
   $('over-diff').innerHTML =
+    (G.daily ? `<span class="diff-badge" style="color:#ffd54f;border-color:#ffd54f">☀ DAILY</span>` : '') +
     `<span class="diff-badge" style="color:${diff.color};border-color:${diff.color}">◆ ${diff.name}</span>` +
     (G.round > 1 ? `<span class="diff-badge" style="color:#b388ff;border-color:#b388ff">🌀 ROUND ${G.round}</span>` : '');
-  $('over-flavor').textContent = won
+  const flav = won
     ? (G.bossKills > 1 ? 'The Hungry King kept coming back. You kept ending him.' : 'King Glob is unmade — the Balance holds.')
     : 'The horde was too many. This time.';
+  const newAch = (G.newAch && G.newAch.length)
+    ? `<div class="ach-unlocked">${G.newAch.map(a => `<span>🏆 ${a.icon} ${a.name}</span>`).join('')}</div>` : '';
+  $('over-flavor').innerHTML = flav + newAch;
   $('over-score').innerHTML =
     `<div class="score-num">${G.score.toLocaleString()}</div>
-     <div class="score-lbl">SCORE${rank >= 0 ? ` · #${rank + 1} ALL-TIME` : ''}${rank === 0 ? ' <span class="newbest">NEW BEST!</span>' : ''}</div>`;
+     <div class="score-lbl">SCORE${rank >= 0 ? ` · #${rank + 1} ALL-TIME` : ''}${rank === 0 ? ' <span class="newbest">NEW BEST!</span>' : ''}</div>
+     ${G.shellsEarned ? `<div class="shells-earned">🐚 +${G.shellsEarned} shells</div>` : ''}`;
   const t = G.time | 0;
   $('over-summary').innerHTML = [
     ['⏱', fmtTime(t), 'survived'],
@@ -1857,6 +2179,95 @@ function buildStatsScreen(rank) {
   $('over-heroes').scrollTop = 0;
 }
 
+// ---------------- Shareable run-recap card ----------------
+// Composes a 1080×1080 poster of the run (lead Guardian, score, key stats,
+// unlocked achievements) and hands it to the Web Share API, falling back to a
+// PNG download. A genuine "show your friends" wow-moment.
+function buildRecapCanvas() {
+  const S = 1080, c = document.createElement('canvas');
+  c.width = S; c.height = S;
+  const score = G.score || 0;
+  const x = c.getContext('2d');
+  // backdrop
+  const bg = x.createLinearGradient(0, 0, 0, S);
+  const won = G.victory;
+  bg.addColorStop(0, won ? '#123a1f' : '#2a1216');
+  bg.addColorStop(1, '#05140d');
+  x.fillStyle = bg; x.fillRect(0, 0, S, S);
+  // vignette frame
+  x.strokeStyle = won ? 'rgba(255,213,79,.5)' : 'rgba(239,154,154,.4)'; x.lineWidth = 6;
+  x.strokeRect(28, 28, S - 56, S - 56);
+  x.textAlign = 'center';
+  // title
+  x.fillStyle = '#ffd54f'; x.font = 'bold 60px "Trebuchet MS",sans-serif';
+  x.fillText('BALITOPIA', S / 2, 118);
+  x.fillStyle = '#9fd8b4'; x.font = '26px "Trebuchet MS",sans-serif';
+  x.fillText('GUARDIANS OF THE BROKEN CAGES', S / 2, 158);
+  // lead portrait
+  const port = Sprites.portrait(G.startHero, 300);
+  const pw = port.width || 300;
+  x.save();
+  x.shadowColor = 'rgba(0,0,0,.6)'; x.shadowBlur = 30;
+  x.drawImage(port, S / 2 - pw / 2, 200, pw, pw);
+  x.restore();
+  const lead = HEROES[G.startHero];
+  x.fillStyle = '#fff'; x.font = 'bold 46px "Trebuchet MS",sans-serif';
+  x.fillText(lead.name.toUpperCase(), S / 2, 560);
+  const leadTier = heroState[G.startHero] ? heroState[G.startHero].tier : 0;
+  x.fillStyle = TIER_COLORS[leadTier]; x.font = 'bold 26px "Trebuchet MS",sans-serif';
+  x.fillText(TIER_NAMES[leadTier] + '  ·  ◆ ' + G.diff.name + (G.round > 1 ? '  ·  🌀 ROUND ' + G.round : ''), S / 2, 598);
+  // score
+  x.fillStyle = won ? '#ffd54f' : '#ef9a9a'; x.font = 'bold 130px "Trebuchet MS",sans-serif';
+  x.fillText(score.toLocaleString(), S / 2, 740);
+  x.fillStyle = '#9fd8b4'; x.font = '28px "Trebuchet MS",sans-serif';
+  x.fillText(won ? (G.bossKills > 1 ? `KING GLOB SLAIN ×${G.bossKills}` : 'KING GLOB SLAIN') : 'FINAL SCORE', S / 2, 782);
+  // stat strip
+  const stats = [
+    ['⏱', fmtTime(G.time | 0)], ['☠', G.kills.toLocaleString()],
+    ['⛓', freedSet.size + '/24'], ['★', 'LV ' + G.level],
+  ];
+  const bw = 224, gap = 12, totalW = stats.length * bw + (stats.length - 1) * gap, sx = S / 2 - totalW / 2, sy = 830;
+  stats.forEach(([ic, v], i) => {
+    const bx = sx + i * (bw + gap);
+    x.fillStyle = 'rgba(255,255,255,.06)'; roundRect(x, bx, sy, bw, 110, 16); x.fill();
+    x.fillStyle = '#ffd54f'; x.font = '38px "Trebuchet MS",sans-serif';
+    x.fillText(ic, bx + bw / 2, sy + 50);
+    x.fillStyle = '#fff'; x.font = 'bold 34px "Trebuchet MS",sans-serif';
+    x.fillText(v, bx + bw / 2, sy + 92);
+  });
+  // footer tagline
+  x.fillStyle = '#cfd8e6'; x.font = 'italic 26px "Trebuchet MS",sans-serif';
+  x.fillText('Can you break more cages?', S / 2, 1010);
+  return c;
+}
+function roundRect(x, rx, ry, rw, rh, r) {
+  x.beginPath();
+  x.moveTo(rx + r, ry); x.arcTo(rx + rw, ry, rx + rw, ry + rh, r);
+  x.arcTo(rx + rw, ry + rh, rx, ry + rh, r); x.arcTo(rx, ry + rh, rx, ry, r);
+  x.arcTo(rx, ry, rx + rw, ry, r); x.closePath();
+}
+async function shareRecap() {
+  Sound.sfx.uiClick();
+  let canvas;
+  try { canvas = buildRecapCanvas(); } catch (e) { return; }
+  canvas.toBlob(async blob => {
+    if (!blob) return;
+    const file = new File([blob], 'balitopia-run.png', { type: 'image/png' });
+    // native share sheet where supported (mobile), otherwise download
+    if (navigator.canShare && navigator.canShare({ files: [file] })) {
+      try {
+        await navigator.share({ files: [file], title: 'Balitopia', text: `I scored ${G.score.toLocaleString()} in Balitopia!` });
+        return;
+      } catch (e) { /* user cancelled or unsupported — fall through to download */ }
+    }
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = 'balitopia-run.png';
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 4000);
+  }, 'image/png');
+}
+
 function endGame() {
   if (G.over) return;
   G.over = true;
@@ -1886,7 +2297,16 @@ function buildRecordsScreen() {
   const records = Array.isArray(save.records) ? save.records : [];
   const mastery = save.mastery || {};
   const medal = ['🥇', '🥈', '🥉'];
-  let html = '<div class="rec-block"><div class="rec-h">BEST RUNS</div>';
+  // today's daily challenge summary
+  const s = dailySetup();
+  const dBest = (save.daily && save.daily[dayKey()]) || 0;
+  const dd = DIFFICULTIES[s.diff];
+  let html = `<div class="rec-block"><div class="rec-h">☀ TODAY'S DAILY</div>
+    <div class="daily-card">
+      <div>Guardian: <b>${HEROES[s.hero].name}</b> · <span style="color:${dd.color}">${dd.name}</span> · ${s.region.split('-')[1]}</div>
+      <div>Your best today: <b>${dBest ? dBest.toLocaleString() : '—'}</b></div>
+    </div></div>`;
+  html += '<div class="rec-block"><div class="rec-h">BEST RUNS</div>';
   if (!records.length) html += '<div class="rec-empty">No runs yet — go make history.</div>';
   else {
     html += '<div class="rec-list">';
@@ -1904,6 +2324,15 @@ function buildRecordsScreen() {
     html += '</div>';
   }
   html += '</div>';
+  // achievements
+  const ach = save.ach || {};
+  const gotN = ACHIEVEMENTS.filter(a => ach[a.id]).length;
+  html += `<div class="rec-block"><div class="rec-h">ACHIEVEMENTS <span class="rec-sub">${gotN}/${ACHIEVEMENTS.length}</span></div><div class="ach-grid">`;
+  for (const a of ACHIEVEMENTS) {
+    const got = !!ach[a.id];
+    html += `<div class="ach-cell${got ? ' got' : ''}"><div class="ach-ic">${got ? a.icon : '🔒'}</div><div class="ach-tx"><b>${a.name}</b><span>${a.desc}</span></div></div>`;
+  }
+  html += '</div></div>';
   const done = HEROES.filter(h => (mastery[h.id] || 0) >= 4).length;
   html += `<div class="rec-block"><div class="rec-h">GUARDIAN CODEX <span class="rec-sub">${done}/24 mastered</span></div><div id="codex-grid"></div></div>`;
   $('records-body').innerHTML = html;
@@ -1925,9 +2354,178 @@ function buildRecordsScreen() {
 function openRecords() { Sound.sfx.uiClick(); buildRecordsScreen(); $('screen-records').classList.remove('hidden'); }
 function closeRecords() { Sound.sfx.uiBack(); $('screen-records').classList.add('hidden'); }
 
+// ---------------- Shell Shrine (meta shop) ----------------
+function buildShop() {
+  const save = loadSave();
+  const shells = save.shells || 0;
+  const perks = save.perks || {};
+  $('shop-shell-count').textContent = shells.toLocaleString();
+  const body = $('shop-body');
+  body.innerHTML = '';
+  for (const p of PERKS) {
+    const lv = perks[p.id] || 0;
+    const maxed = lv >= p.max;
+    const cost = maxed ? 0 : p.cost(lv);
+    const row = document.createElement('div');
+    row.className = 'shop-row' + (maxed ? ' maxed' : '');
+    row.innerHTML =
+      `<div class="shop-ic">${p.icon}</div>
+       <div class="shop-mid"><b>${p.name}</b><span>${p.desc}</span>
+         <div class="shop-dots">${Array.from({ length: p.max }, (_, i) => `<i class="${i < lv ? 'on' : ''}"></i>`).join('')}</div></div>
+       <button class="shop-buy" ${maxed || shells < cost ? 'disabled' : ''}>${maxed ? 'MAX' : '🐚 ' + cost}</button>`;
+    if (!maxed) row.querySelector('.shop-buy').addEventListener('click', () => {
+      const s = loadSave();
+      if ((s.shells || 0) < cost) return;
+      s.shells -= cost;
+      s.perks = s.perks || {}; s.perks[p.id] = (s.perks[p.id] || 0) + 1;
+      saveGame(s);
+      Sound.sfx.uiClick(); buzz(20);
+      buildShop();
+    });
+    body.appendChild(row);
+  }
+}
+function openShop() { Sound.ensure(); Sound.sfx.uiClick(); buildShop(); $('screen-shop').classList.remove('hidden'); }
+function closeShop() { Sound.sfx.uiBack(); $('screen-shop').classList.add('hidden'); }
+
+// ---------------- Settings ----------------
+function bindSettings() {
+  const sync = () => {
+    $('set-music').value = prefs.musicVol; $('set-music-v').textContent = prefs.musicVol + '%';
+    $('set-sfx').value = prefs.sfxVol; $('set-sfx-v').textContent = prefs.sfxVol + '%';
+    $('set-haptics').checked = !!prefs.haptics;
+    $('set-motion').checked = !prefs.motion;         // checkbox = "reduced motion ON"
+    $('set-colorblind').checked = !!prefs.colorblind;
+    $('set-minimap').checked = !!prefs.minimap;
+    $('set-uiscale').value = prefs.uiscale; $('set-uiscale-v').textContent = prefs.uiscale + '%';
+  };
+  $('set-music').addEventListener('input', e => { prefs.musicVol = +e.target.value; $('set-music-v').textContent = prefs.musicVol + '%'; savePrefs(); });
+  $('set-sfx').addEventListener('input', e => { prefs.sfxVol = +e.target.value; $('set-sfx-v').textContent = prefs.sfxVol + '%'; savePrefs(); });
+  $('set-sfx').addEventListener('change', () => Sound.sfx.uiSelect());
+  $('set-haptics').addEventListener('change', e => { prefs.haptics = e.target.checked ? 1 : 0; savePrefs(); if (prefs.haptics) buzz(20); });
+  $('set-motion').addEventListener('change', e => { prefs.motion = e.target.checked ? 0 : 1; savePrefs(); });
+  $('set-colorblind').addEventListener('change', e => { prefs.colorblind = e.target.checked ? 1 : 0; savePrefs(); });
+  $('set-minimap').addEventListener('change', e => { prefs.minimap = e.target.checked ? 1 : 0; savePrefs(); });
+  $('set-uiscale').addEventListener('input', e => { prefs.uiscale = +e.target.value; $('set-uiscale-v').textContent = prefs.uiscale + '%'; savePrefs(); });
+  $('btn-export-save').addEventListener('click', exportSave);
+  $('btn-import-save').addEventListener('click', importSave);
+  $('btn-wipe-save').addEventListener('click', wipeSave);
+  window.__syncSettings = sync;
+}
+function openSettings(fromScreen) {
+  Sound.sfx.uiClick();
+  window.__settingsFrom = fromScreen || 'screen-title';
+  window.__syncSettings && window.__syncSettings();
+  $('screen-settings').classList.remove('hidden');
+}
+function closeSettings() {
+  Sound.sfx.uiBack();
+  $('screen-settings').classList.add('hidden');
+}
+function exportSave() {
+  const data = localStorage.getItem('balitopia') || '{}';
+  try {
+    navigator.clipboard.writeText(data);
+    banner ? null : null;
+  } catch (e) {}
+  const blob = new Blob([data], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob); a.download = 'balitopia-save.json';
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+}
+function importSave() {
+  const inp = document.createElement('input');
+  inp.type = 'file'; inp.accept = 'application/json,.json';
+  inp.onchange = () => {
+    const f = inp.files && inp.files[0];
+    if (!f) return;
+    const r = new FileReader();
+    r.onload = () => {
+      try {
+        const parsed = JSON.parse(r.result);
+        if (parsed && typeof parsed === 'object') {
+          localStorage.setItem('balitopia', JSON.stringify(parsed));
+          loadPrefs(); window.__syncSettings && window.__syncSettings();
+          alert('Save imported. Restart the app to see all progress.');
+        }
+      } catch (e) { alert('That file was not a valid Balitopia save.'); }
+    };
+    r.readAsText(f);
+  };
+  inp.click();
+}
+function wipeSave() {
+  if (!confirm('Erase ALL Balitopia progress — records, mastery, and settings? This cannot be undone.')) return;
+  localStorage.removeItem('balitopia');
+  prefs = { ...PREF_DEFAULTS }; applyPrefs();
+  window.__syncSettings && window.__syncSettings();
+  location.reload();
+}
+
+// ---------------- How to play ----------------
+function buildHowto() {
+  $('howto-body').innerHTML = `
+    <h3>CONTROLS</h3>
+    <div class="ht-row"><span class="ht-key">Move</span><span>Drag anywhere on the <b>left half</b> of the screen (or WASD / arrow keys)</span></div>
+    <div class="ht-row"><span class="ht-key">Attack</span><span>Automatic — every Guardian auto-aims at the nearest threat</span></div>
+    <div class="ht-row"><span class="ht-key">Powershot ⚡</span><span>Tap the <b>right half</b> of the screen (or Space) when your card glows — a screen-clearing signature blast</span></div>
+    <div class="ht-row"><span class="ht-key">Possess</span><span>Tap any freed Guardian's face card along the bottom to become them</span></div>
+    <div class="ht-row"><span class="ht-key">Pause</span><span>Tap ☰ (or Esc / P) to open the roster and pause</span></div>
+    <h3>THE ISLAND</h3>
+    <div class="ht-row"><span class="ht-ico">⛓</span><span><b>Free the Guardians.</b> The other 23 are locked in cursed cages. Shoot a cage until it breaks — that Guardian fights beside you, and you can possess them. The <b>gold arrow</b> points to the nearest cage.</span></div>
+    <div class="ht-row"><span class="ht-ico">🎨</span><span><b>Colour = danger.</b> Enemies come in six power tiers, shown by hue: green → blue → purple → pink → orange → gold. (Turn on <em>Colorblind danger pips</em> in Settings for a shape cue.)</span></div>
+    <div class="ht-row"><span class="ht-ico">👑</span><span><b>King Glob</b> arrives at 8:00 — the red arrow tracks him. Beat him and endless rounds begin, each tougher than the last.</span></div>
+    <h3>GROWING STRONGER</h3>
+    <div class="ht-row"><span class="ht-ico">★</span><span><b>Level up</b> by collecting gems, then flip one of three mystery cards for a run-long upgrade.</span></div>
+    <div class="ht-row"><span class="ht-ico">🟩</span><span><b>Mastery.</b> Each Guardian levels from the damage <em>they</em> deal — their card border climbs green → blue → red → orange → gold (Super Saiyan), and their weapon <b>evolves</b> at the top.</span></div>
+  `;
+}
+function openHowto() { Sound.sfx.uiClick(); buildHowto(); $('screen-howto').classList.remove('hidden'); }
+function closeHowto() { Sound.sfx.uiBack(); $('screen-howto').classList.add('hidden'); }
+
+// ---------------- Save data (versioned) ----------------
+const SAVE_VERSION = 2;
+function loadSave() {
+  let s;
+  try { s = JSON.parse(localStorage.getItem('balitopia') || '{}'); } catch (e) { s = {}; }
+  if (!s || typeof s !== 'object') s = {};
+  // migrate older saves forward instead of silently misreading fields
+  if (!s.v) {                                  // v1 (unversioned) → v2
+    s.records = Array.isArray(s.records) ? s.records : [];
+    s.mastery = s.mastery && typeof s.mastery === 'object' ? s.mastery : {};
+    s.v = SAVE_VERSION;
+  }
+  return s;
+}
+function saveGame(s) {
+  s.v = SAVE_VERSION;
+  try { localStorage.setItem('balitopia', JSON.stringify(s)); } catch (e) {}
+}
+
+// ---------------- Preferences ----------------
+const PREF_DEFAULTS = { musicVol: 80, sfxVol: 100, haptics: 1, motion: 1, colorblind: 0, uiscale: 100, minimap: 1 };
+let prefs = { ...PREF_DEFAULTS };
+function loadPrefs() {
+  const save = loadSave();
+  prefs = { ...PREF_DEFAULTS, ...(save.prefs || {}) };
+  applyPrefs();
+}
+function applyPrefs() {
+  Sound.setMusicVol(prefs.musicVol / 100);
+  Sound.setSfxVol(prefs.sfxVol / 100);
+  document.body.classList.toggle('reduce-motion', !prefs.motion);
+  document.documentElement.style.setProperty('--ui-scale', prefs.uiscale / 100);
+}
+function savePrefs() {
+  const save = loadSave();
+  save.prefs = prefs;
+  saveGame(save);
+  applyPrefs();
+}
+
 // ---------------- Menus ----------------
 let selectedHero = 0;
-const loadSave = () => { try { return JSON.parse(localStorage.getItem('balitopia') || '{}'); } catch (e) { return {}; } };
 
 function enterApp() {
   Sound.ensure();   // the caller (goStory / goSelect) owns music from here
@@ -1940,8 +2538,11 @@ function enterApp() {
 
 // menu-screen navigation (keeps only one visible; manages menu music)
 const MENU_SCREENS = ['screen-title', 'screen-story', 'screen-select'];
+let lastScreen = null;
 function showScreen(id, music) {
   MENU_SCREENS.forEach(s => $(s).classList.toggle('hidden', s !== id));
+  if (lastScreen && lastScreen !== id) Sound.playFile('assets/audio/sfx/whoosh.mp3', 0.5);
+  lastScreen = id;
   if (music === 'title') Sound.playMusic('music/title.mp3');
   else if (music === 'none') { Sound.stopMusic(); Sound.stopPreview(); }
 }
@@ -1993,12 +2594,21 @@ function buildTitle() {
   $('btn-menu-start').addEventListener('click', () => { enterApp(); Sound.sfx.uiClick(); goStory(); });
   $('btn-menu-continue').addEventListener('click', () => { enterApp(); Sound.sfx.uiClick(); goSelect(); });
   $('btn-menu-records').addEventListener('click', () => { enterApp(); openRecords(); });
+  $('btn-menu-daily').addEventListener('click', startDaily);
+  $('btn-menu-shop').addEventListener('click', openShop);
+  $('btn-shop-back').addEventListener('click', closeShop);
   $('btn-story-continue').addEventListener('click', () => { Sound.sfx.uiClick(); goSelect(); });
   $('btn-story-back').addEventListener('click', () => { Sound.sfx.uiBack(); goTitle(); });
   $('btn-select-back').addEventListener('click', () => { Sound.sfx.uiBack(); goStory(); });
   $('btn-records-back').addEventListener('click', closeRecords);
   $('btn-over-records').addEventListener('click', openRecords);
+  $('btn-over-share').addEventListener('click', shareRecap);
   $('btn-over-menu').addEventListener('click', () => { Sound.sfx.uiBack(); goTitle(); });
+  $('btn-menu-settings').addEventListener('click', () => { Sound.ensure(); openSettings('screen-title'); });
+  $('btn-settings-back').addEventListener('click', closeSettings);
+  $('btn-menu-howto').addEventListener('click', () => { Sound.ensure(); openHowto(); });
+  $('btn-howto-back').addEventListener('click', closeHowto);
+  bindSettings();
 }
 
 function buildSelect() {
@@ -2039,7 +2649,38 @@ function showDetail(i) {
   $('hero-detail-name').textContent = `${h.name} — ${h.title}`;
   $('hero-detail-power').textContent = h.power;
   $('hero-detail-desc').textContent = h.desc;
+  // stat bars (HP / SPEED / POWER), normalized across the roster
+  const R = heroStatRanges();
+  const nrm = (v, lo, hi) => Math.round(Math.max(8, Math.min(100, (v - lo) / (hi - lo) * 92 + 8)));
+  const bars = [
+    ['HP', nrm(h.hp, R.hp[0], R.hp[1]), '#ef5350'],
+    ['SPEED', nrm(h.spd, R.spd[0], R.spd[1]), '#4dd0e1'],
+    ['POWER', nrm(heroPower(h), R.pow[0], R.pow[1]), '#ffd54f'],
+  ];
+  let stats = document.getElementById('hero-detail-stats');
+  if (!stats) { stats = document.createElement('div'); stats.id = 'hero-detail-stats'; $('hero-detail-text').appendChild(stats); }
+  stats.innerHTML = bars.map(([lbl, w, c]) =>
+    `<div class="hstat"><span>${lbl}</span><div class="hstat-bar"><i style="width:${w}%;background:${c}"></i></div></div>`).join('');
   $('hero-detail').classList.remove('hidden');
+}
+// rough sustained-DPS estimate so heroes can be compared at a glance
+function heroPower(h) {
+  let p = 0;
+  for (const w of h.weapons) {
+    const c = w.count || 1, iv = w.interval || 0.3;
+    if (w.type === 'orbit') p += w.dmg * c * 3;
+    else if (w.type === 'aura' || w.type === 'beam' || w.type === 'trail') p += w.dmg / iv * 1.4;
+    else if (w.type === 'chain') p += w.dmg * ((w.jumps || 1) + 1) / iv;
+    else p += w.dmg * c / iv;   // shot / nova / slash
+  }
+  return p;
+}
+let _statRanges = null;
+function heroStatRanges() {
+  if (_statRanges) return _statRanges;
+  const hp = HEROES.map(h => h.hp), spd = HEROES.map(h => h.spd), pow = HEROES.map(heroPower);
+  _statRanges = { hp: [Math.min(...hp), Math.max(...hp)], spd: [Math.min(...spd), Math.max(...spd)], pow: [Math.min(...pow), Math.max(...pow)] };
+  return _statRanges;
 }
 
 // ---------------- Wire up ----------------
@@ -2048,20 +2689,39 @@ function wire() {
   $('btn-retry').addEventListener('click', () => {
     Sound.sfx.uiClick();
     $('screen-over').classList.add('hidden');
-    goSelect();
+    if (G.daily) startDaily(); else goSelect();   // replay the same daily
   });
   $('btn-roster').addEventListener('click', () => {
     if ($('screen-roster').classList.contains('hidden')) openRoster();
     else closeRoster();
   });
   $('btn-roster-close').addEventListener('click', closeRoster);
+  $('btn-roster-settings').addEventListener('click', () => openSettings('screen-roster'));
+  $('btn-roster-forfeit').addEventListener('click', () => {
+    if (confirm('End this run now? Your score so far will be recorded.')) {
+      Sound.sfx.uiBack();
+      $('screen-roster').classList.add('hidden');
+      endGame();
+    }
+  });
+  $('btn-lu-reroll').addEventListener('click', () => {
+    if (G.rerolls <= 0) return;
+    G.rerolls--;
+    Sound.sfx.uiSelect();
+    showLevelUp();   // re-roll a fresh trio of face-down cards
+  });
+  $('btn-lu-skip').addEventListener('click', () => {
+    Sound.sfx.uiBack();
+    if (player) player.hp = Math.min(maxHP(), player.hp + maxHP() * 0.15);   // reward: patch up instead of powering up
+    closeLevelUp();
+  });
   $('btn-mute').addEventListener('click', () => {
     const m = Sound.toggleMute();
     $('btn-mute').classList.toggle('muted', m);
     try {
       const save = loadSave();
       save.muted = m;
-      localStorage.setItem('balitopia', JSON.stringify(save));
+      saveGame(save);
     } catch (e) {}
   });
   document.addEventListener('visibilitychange', () => {
@@ -2073,6 +2733,7 @@ function wire() {
 Sprites.init().then(() => {
   buildTitle();
   wire();
+  loadPrefs();
   requestAnimationFrame(frame);
   document.body.dataset.ready = '1';
 });
@@ -2087,9 +2748,11 @@ window.__balitopia = {
   heroState: () => heroState,
   telegraphs: () => telegraphs,
   gems: () => gems,
+  heroMods: () => heroMods,
   joys: { move: joyMove },
-  hurtPlayer, dropGem, gainXP,
+  hurtPlayer, dropGem, gainXP, levelUpPool, showLevelUp,
   possess, breakCage, newGame, spawnEnemy, spawnBoss, powershot, addDamage,
+  buildRecapCanvas, hitStop, prefs: () => prefs,
 };
 
 })();

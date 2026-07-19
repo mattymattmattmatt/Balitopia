@@ -44,9 +44,50 @@
   <nav id="title-menu">
     <button class="menu-btn" id="btn-menu-start">START</button>
     <button class="menu-btn hidden" id="btn-menu-continue">CONTINUE</button>
+    <button class="menu-btn" id="btn-menu-daily">☀ DAILY CHALLENGE</button>
+    <button class="menu-btn" id="btn-menu-shop">🐚 SHELL SHRINE</button>
     <button class="menu-btn" id="btn-menu-records">RECORDS</button>
+    <div id="title-sub-btns">
+      <button class="menu-btn small" id="btn-menu-howto">HOW TO PLAY</button>
+      <button class="menu-btn small" id="btn-menu-settings">⚙ SETTINGS</button>
+    </div>
   </nav>
-  <p class="hint" id="title-hint">sound on 🔊 · best in landscape</p>
+  <p class="hint" id="title-hint">tap ⚙ for volume &amp; accessibility · best in landscape</p>
+</div>
+
+<!-- ===== Settings ===== -->
+<div id="screen-settings" class="screen hidden">
+  <button class="back-btn" id="btn-settings-back">‹ BACK</button>
+  <h2 class="select-title">SETTINGS</h2>
+  <div id="settings-body">
+    <label class="set-row"><span>Music volume</span><input type="range" id="set-music" min="0" max="100" step="5"><b id="set-music-v"></b></label>
+    <label class="set-row"><span>Sound effects</span><input type="range" id="set-sfx" min="0" max="100" step="5"><b id="set-sfx-v"></b></label>
+    <label class="set-row toggle"><span>Vibration (haptics)</span><input type="checkbox" id="set-haptics"></label>
+    <label class="set-row toggle"><span>Reduced motion</span><input type="checkbox" id="set-motion"></label>
+    <label class="set-row toggle"><span>Colorblind danger pips</span><input type="checkbox" id="set-colorblind"></label>
+    <label class="set-row toggle"><span>Minimap</span><input type="checkbox" id="set-minimap"></label>
+    <label class="set-row"><span>UI text size</span><input type="range" id="set-uiscale" min="90" max="130" step="5"><b id="set-uiscale-v"></b></label>
+    <div class="set-danger">
+      <button class="menu-btn2" id="btn-export-save">EXPORT SAVE</button>
+      <button class="menu-btn2" id="btn-import-save">IMPORT SAVE</button>
+      <button class="menu-btn2 danger" id="btn-wipe-save">ERASE ALL DATA</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===== Shell Shrine (meta shop) ===== -->
+<div id="screen-shop" class="screen hidden">
+  <button class="back-btn" id="btn-shop-back">‹ BACK</button>
+  <h2 class="select-title">SHELL SHRINE</h2>
+  <div id="shop-shells">🐚 <b id="shop-shell-count">0</b> shells</div>
+  <div id="shop-body"></div>
+</div>
+
+<!-- ===== How To Play ===== -->
+<div id="screen-howto" class="screen hidden">
+  <button class="back-btn" id="btn-howto-back">‹ BACK</button>
+  <h2 class="select-title">HOW TO PLAY</h2>
+  <div id="howto-body"></div>
 </div>
 
 <!-- ===== Story ===== -->
@@ -99,13 +140,21 @@
   <h2 class="select-title">GUARDIANS</h2>
   <p class="select-sub">Tap a freed guardian to possess them</p>
   <div id="roster-grid"></div>
-  <button class="big-btn" id="btn-roster-close">RESUME</button>
+  <div id="roster-btns">
+    <button class="big-btn" id="btn-roster-close">RESUME</button>
+    <button class="menu-btn2" id="btn-roster-settings">⚙ SETTINGS</button>
+    <button class="menu-btn2 danger" id="btn-roster-forfeit">END RUN</button>
+  </div>
 </div>
 
 <!-- ===== Level Up ===== -->
 <div id="screen-levelup" class="screen hidden">
   <h2 class="select-title">LEVEL UP!</h2>
   <div id="upgrade-row"></div>
+  <div id="levelup-ctrls">
+    <button class="lu-ctrl" id="btn-lu-reroll">🎲 REROLL <b id="lu-reroll-n"></b></button>
+    <button class="lu-ctrl" id="btn-lu-skip">⏭ SKIP <span class="lu-ctrl-sub">+15% HP</span></button>
+  </div>
 </div>
 
 <!-- ===== Game Over / Victory — detailed run stats ===== -->
@@ -122,6 +171,7 @@
     <div id="over-heroes"></div>
     <div id="over-btns">
       <button class="big-btn" id="btn-retry">PLAY AGAIN</button>
+      <button class="menu-btn2" id="btn-over-share">📸 SHARE</button>
       <button class="menu-btn2" id="btn-over-records">RECORDS</button>
       <button class="menu-btn2" id="btn-over-menu">MENU</button>
     </div>

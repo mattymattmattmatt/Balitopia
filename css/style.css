@@ -56,7 +56,31 @@ html, body {
   transition:transform .1s, box-shadow .15s;
 }
 .menu-btn:active { transform:scale(.95); box-shadow:0 0 30px rgba(255,213,79,.7), inset 0 0 18px rgba(125,255,212,.3); }
+#title-sub-btns { display:flex; gap:8px; margin-top:4px; }
+.menu-btn.small { width:auto; margin:4px 0; padding:6px 14px; font-size:clamp(9px,2vh,12px); letter-spacing:2px; text-indent:2px; }
 #title-hint { margin-bottom:max(1.6vh, env(safe-area-inset-bottom)); text-shadow:0 1px 3px #000; }
+
+/* ---- Settings & How-To screens ---- */
+#screen-settings, #screen-howto { justify-content:flex-start; z-index:31; background:linear-gradient(160deg,#0a0a14,#05040b 70%); }
+#settings-body { width:min(560px,92vw); display:flex; flex-direction:column; gap:9px; margin-top:4px; overflow-y:auto; max-height:78vh; padding:4px 6px 16px; }
+.set-row { display:flex; align-items:center; gap:12px; font-size:clamp(12px,2.6vh,15px); color:#e4d9ec;
+  background:rgba(255,255,255,.05); border:1px solid rgba(128,203,196,.22); border-radius:11px; padding:9px 14px; }
+.set-row > span { flex:1 1 auto; }
+.set-row input[type=range] { flex:0 0 44%; accent-color:#ffd54f; height:22px; }
+.set-row b { min-width:38px; text-align:right; color:#ffd54f; font-size:12px; }
+.set-row.toggle input { width:22px; height:22px; accent-color:#ffd54f; }
+.set-danger { display:flex; gap:8px; flex-wrap:wrap; justify-content:center; margin-top:8px; }
+.menu-btn2.danger { color:#ff8a80; border-color:rgba(255,90,90,.55); }
+#roster-btns { display:flex; gap:10px; align-items:center; justify-content:center; flex-wrap:wrap; margin-top:8px; }
+#howto-body { width:min(680px,94vw); overflow-y:auto; max-height:80vh; padding:6px 10px 20px; font-size:clamp(12px,2.5vh,15px); line-height:1.5; color:#e4d9ec; }
+#howto-body h3 { color:#ffd54f; font-size:clamp(13px,2.8vh,16px); letter-spacing:2px; margin:12px 0 5px; border-bottom:1px solid rgba(255,213,79,.25); padding-bottom:3px; }
+#howto-body .ht-row { display:flex; gap:10px; align-items:baseline; margin:5px 0; }
+#howto-body .ht-key { flex:0 0 34%; color:#80cbc4; font-weight:bold; }
+#howto-body .ht-ico { font-size:18px; }
+@media (max-height:520px) and (orientation:landscape) {
+  #settings-body { max-height:74vh; } .set-row { padding:6px 12px; }
+  #howto-body { max-height:76vh; }
+}
 
 /* ---- Story screen ---- */
 #screen-story {
@@ -181,9 +205,14 @@ html, body {
   #hero-detail-portrait canvas { border-radius:8px; }
   #hero-detail-text h3 { font-size:13px; }
   #hero-detail-text p { font-size:9.5px; line-height:1.3; }
+  #hero-detail-desc { display:none; }   /* stat bars replace flavor text on tight screens */
+  #hero-detail-stats { margin-top:2px; }
+  .hstat > span { flex-basis:38px; }
+  .hstat-bar { height:4px; }
   #hero-detail-power { margin-bottom:1px; }
   #hero-detail .big-btn { font-size:14px; padding:8px 20px; letter-spacing:1px; }
   #screen-roster .big-btn { font-size:13px; padding:7px 22px; margin-top:4px; }
+  #roster-btns .menu-btn2 { font-size:11px; padding:7px 14px; }
   /* story panel: keep it tight so nothing clips on a short phone */
   #story-panel { max-height:96vh; padding:8px 18px; }
   #story-title { font-size:16px; }
@@ -242,6 +271,11 @@ html, body {
 #hero-detail-text h3 { color:#ffd54f; font-size:18px; }
 #hero-detail-text p { font-size:12px; line-height:1.4; color:#cde8df; }
 #hero-detail-power { color:#80cbc4 !important; font-weight:bold; }
+#hero-detail-stats { display:flex; flex-direction:column; gap:2px; margin-top:4px; }
+.hstat { display:flex; align-items:center; gap:6px; }
+.hstat > span { flex:0 0 42px; font-size:8px; letter-spacing:1px; color:#9fd6c9; }
+.hstat-bar { flex:1 1 auto; height:5px; background:rgba(0,0,0,.45); border-radius:3px; overflow:hidden; max-width:150px; }
+.hstat-bar i { display:block; height:100%; border-radius:3px; transition:width .2s; }
 
 /* ============ Level up: face-down mystery cards ============ */
 #upgrade-row { display:flex; gap:14px; padding:10px; flex-wrap:wrap; justify-content:center; }
@@ -282,7 +316,19 @@ html, body {
 .mc-back .uc-icon { font-size:32px; }
 .mc-back h3 { color:#ffd54f; font-size:14px; margin:5px 0 4px; }
 .mc-back p { font-size:10.5px; color:#b7dcd3; line-height:1.35; }
+/* signature (hero-specific) cards get a distinct violet frame + label */
+.upgrade-card.signature .mc-back { border-color:#b388ff; background:linear-gradient(#2a1a42,#140a24); box-shadow:inset 0 0 20px rgba(179,136,255,.2); }
+.upgrade-card.signature .mc-front { border-color:#b388ff; box-shadow:0 6px 18px rgba(0,0,0,.5), inset 0 0 24px rgba(179,136,255,.14); }
+.upgrade-card.signature .mc-front span { color:#d1b3ff; text-shadow:0 0 18px rgba(179,136,255,.8), 0 3px 0 #3a1a5a; }
+.mc-sig { position:absolute; top:6px; left:0; right:0; font-size:8px; letter-spacing:3px; color:#d1b3ff; text-align:center; }
 @media (prefers-reduced-motion: reduce) { .mc-front span { animation:none; } }
+#levelup-ctrls { display:flex; gap:12px; margin-top:16px; justify-content:center; }
+.lu-ctrl { font-family:inherit; font-size:12px; letter-spacing:1px; color:#cfd8e6; background:rgba(255,255,255,.06);
+  border:1px solid rgba(255,255,255,.2); border-radius:10px; padding:9px 16px; cursor:pointer; display:flex; align-items:center; gap:6px; }
+.lu-ctrl:active { transform:scale(.95); }
+.lu-ctrl b { color:#ffd54f; }
+.lu-ctrl.spent { opacity:.35; pointer-events:none; }
+.lu-ctrl-sub { font-size:9px; opacity:.6; letter-spacing:.5px; }
 
 /* ============ Game over — detailed run stats ============ */
 #screen-over { justify-content:center; }
@@ -352,6 +398,35 @@ html, body {
 .rec-hero { flex:1 1 auto; color:#eafaf4; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .rec-diff { font-size:9px; font-weight:bold; letter-spacing:1px; min-width:74px; text-align:right; }
 .rec-meta { font-size:9px; color:#9fd6c9; min-width:118px; text-align:right; }
+/* Shell Shrine (meta shop) */
+#screen-shop { justify-content:flex-start; background:linear-gradient(160deg,#0a0a14,#05040b 70%); }
+#shop-shells { font-size:15px; color:#e4d9ec; margin:2px 0 6px; } #shop-shells b { color:#ffd54f; font-size:18px; }
+#shop-body { width:min(600px,94vw); display:flex; flex-direction:column; gap:8px; overflow-y:auto; max-height:74vh; padding:2px 6px 16px; }
+.shop-row { display:flex; align-items:center; gap:12px; background:rgba(255,255,255,.05); border:1px solid rgba(128,203,196,.2); border-radius:12px; padding:9px 14px; }
+.shop-row.maxed { border-color:rgba(255,213,79,.5); }
+.shop-ic { font-size:24px; min-width:28px; text-align:center; }
+.shop-mid { flex:1 1 auto; min-width:0; }
+.shop-mid b { display:block; font-size:13px; color:#eafaf4; }
+.shop-mid span { font-size:10px; color:#9fd6c9; }
+.shop-dots { display:flex; gap:3px; margin-top:4px; }
+.shop-dots i { width:14px; height:5px; border-radius:3px; background:rgba(255,255,255,.15); }
+.shop-dots i.on { background:#ffd54f; }
+.shop-buy { font-family:inherit; font-weight:bold; font-size:12px; color:#3a1d00; background:linear-gradient(#ffe082,#ffb300); border:none; border-radius:20px; padding:8px 14px; cursor:pointer; min-width:64px; }
+.shop-buy:disabled { background:rgba(255,255,255,.1); color:#7a8a86; cursor:default; }
+.shells-earned { font-size:12px; color:#ffd54f; margin-top:3px; font-weight:bold; }
+@media (max-height:520px) and (orientation:landscape) { #shop-body { max-height:70vh; } .shop-row { padding:6px 12px; } }
+.daily-card { background:rgba(255,213,79,.08); border:1px solid rgba(255,213,79,.4); border-radius:10px; padding:8px 12px; font-size:12px; color:#e4d9ec; }
+.daily-card div { margin:2px 0; } .daily-card b { color:#ffd54f; }
+.ach-unlocked { display:flex; flex-wrap:wrap; gap:6px; justify-content:center; margin-top:5px; }
+.ach-unlocked span { font-size:10px; font-weight:bold; color:#ffe082; background:rgba(255,213,79,.14); border:1px solid rgba(255,213,79,.5); border-radius:10px; padding:2px 8px; animation:readyPulse .8s ease-in-out infinite alternate; }
+.ach-grid { display:grid; grid-template-columns:1fr 1fr; gap:6px; }
+.ach-cell { display:flex; align-items:center; gap:8px; padding:6px 9px; border-radius:9px; background:rgba(255,255,255,.04); border:1px solid rgba(128,203,196,.18); opacity:.5; }
+.ach-cell.got { opacity:1; border-color:rgba(255,213,79,.5); background:rgba(255,213,79,.08); }
+.ach-ic { font-size:20px; min-width:24px; text-align:center; }
+.ach-tx { min-width:0; }
+.ach-tx b { display:block; font-size:11px; color:#eafaf4; }
+.ach-tx span { font-size:9px; color:#9fd6c9; }
+@media (max-width:640px) { .ach-grid { grid-template-columns:1fr; } }
 #codex-grid { display:grid; grid-template-columns:repeat(8,1fr); gap:5px; }
 .codex-cell { display:flex; flex-direction:column; align-items:center; padding:3px 1px 2px; border-radius:8px;
   border:2px solid rgba(128,203,196,.3); background:rgba(255,255,255,.04); }
@@ -472,3 +547,14 @@ html, body {
   .facecard.ready, .facecard .fc-zap, .newbest { animation:none; }
   .facecard.ready { box-shadow:0 0 10px 3px var(--glow, #ffd54f); }
 }
+/* manual reduced-motion toggle (Settings) — mirrors the OS media query */
+body.reduce-motion .facecard.ready, body.reduce-motion .facecard .fc-zap,
+body.reduce-motion .newbest, body.reduce-motion #boss-eta, body.reduce-motion .mc-front span,
+body.reduce-motion #banner { animation:none !important; }
+body.reduce-motion .facecard.ready { box-shadow:0 0 10px 3px var(--glow, #ffd54f); }
+body.reduce-motion #banner { transform:translateX(-50%) scale(1); opacity:1; }
+
+/* UI text scale (Settings) — nudges the HUD/banner readability */
+:root { --ui-scale:1; }
+#hp-text, #lvl-text, #timer, #kills, #freed, #boss-eta { font-size:calc(1em * var(--ui-scale)); }
+#banner { font-size:calc(clamp(16px,4.5vh,28px) * var(--ui-scale)); }
