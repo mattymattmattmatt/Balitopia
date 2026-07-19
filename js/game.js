@@ -857,7 +857,7 @@ function updateBoss(dt) {
     // ground-target the PLAYER's position — a readable, dodgeable AoE
     b.slamCd = b.enraged ? 8 : 11;
     telegraphs.push({ x: player.x, y: player.y, r: 165, t: 0, dur: 1.1, dmg: 38 * (G.diff ? G.diff.edmg : 1) });
-    Sound.sfx.nova();
+    Sound.playFile('assets/audio/sfx/glob_slam.wav', 0.85);
   }
 }
 
@@ -1755,8 +1755,8 @@ function newGame(heroIdx, diffIdx) {
     if (!save.seenHints) {
       save.seenHints = 1;
       localStorage.setItem('balitopia', JSON.stringify(save));
-      banner('LEFT THUMB MOVES · RIGHT THUMB AIMS');
-      banner('⛓ FOLLOW THE GOLD ARROW TO A CAGE');
+      banner('◀ DRAG LEFT SIDE TO MOVE · TAP RIGHT SIDE FOR POWERSHOT ⚡');
+      banner('⛓ FOLLOW THE GOLD ARROW TO A CAGE — FREE YOUR KIN');
     }
   } catch (e) {}
 }
@@ -1940,8 +1940,11 @@ function enterApp() {
 
 // menu-screen navigation (keeps only one visible; manages menu music)
 const MENU_SCREENS = ['screen-title', 'screen-story', 'screen-select'];
+let lastScreen = null;
 function showScreen(id, music) {
   MENU_SCREENS.forEach(s => $(s).classList.toggle('hidden', s !== id));
+  if (lastScreen && lastScreen !== id) Sound.playFile('assets/audio/sfx/whoosh.mp3', 0.5);
+  lastScreen = id;
   if (music === 'title') Sound.playMusic('music/title.mp3');
   else if (music === 'none') { Sound.stopMusic(); Sound.stopPreview(); }
 }
