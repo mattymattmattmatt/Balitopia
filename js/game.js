@@ -8,7 +8,17 @@
 
 // ---------------- Constants ----------------
 const VIEW_H = 540;                 // logical viewport height (world px) — reference only
-const VIEW_AREA = 540 * 1000;       // every device sees the SAME amount of world
+// Every device sees the same AMOUNT of world (fit by area, not height), so a
+// 21:9 phone doesn't get 30% more sight-line than a 4:3 tablet.
+// Raised from 540k: the previous value was noticeably tighter than the old
+// fixed-540px-height framing, and the squad needs room to read.
+const VIEW_AREA = 760 * 1000;
+// ...and the view widens as you free Guardians. A 24-strong squad plus its
+// projectiles simply needs more screen than a lone Guardian does, so the camera
+// opens up a little with every cage you break.
+const VIEW_PER_FREED = 0.016;       // +1.6% linear view per Guardian
+const VIEW_FREED_CAP = 0.30;        // ...up to +30%
+let viewMul = 1, viewMulTarget = 1; // declared here: resize() runs before G exists
 const WORLD = 5200;                 // world is WORLD x WORLD
 const CELL = 88;                    // spatial hash cell
 const MAX_ENEMIES = 300;
@@ -20,13 +30,16 @@ const DASH_DIST = 190;
 const DASH_IFRAME = 0.32;
 
 // Quality presets — auto-selected from a boot benchmark, overridable in Settings.
-// dpr is the single biggest lever: it scales EVERY full-screen fill quadratically.
-// 1.75 on a 3x display is visually indistinguishable from 2 and ~23% cheaper.
+// DPR is the dominant lever: it scales every full-screen fill quadratically,
+// and profiling showed the frame is fill-bound, not JS-bound. Measured on a
+// 3x-density viewport with 300 enemies: dpr 1.75 -> 1.0 doubled the frame rate.
+// This art is soft and painted, not pixel art, so 1.25 is visually fine.
 const QUALITY = {
-  high:     { parts: 1.0, statusFx: 40, dpr: 1.75, light: 1, decor: 1.0, trails: 1 },
-  balanced: { parts: 0.6, statusFx: 22, dpr: 1.5,  light: 1, decor: 0.7, trails: 1 },
-  battery:  { parts: 0.3, statusFx: 10, dpr: 1.25, light: 0, decor: 0.45, trails: 0 },
+  high:     { parts: 1.0, statusFx: 34, dpr: 1.3, light: 1, decor: 1.0,  trails: 1, lightScale: 0.45 },
+  balanced: { parts: 0.55, statusFx: 18, dpr: 1.05, light: 1, decor: 0.7,  trails: 1, lightScale: 0.36 },
+  battery:  { parts: 0.25, statusFx: 8,  dpr: 0.9, light: 1, decor: 0.4, trails: 0, lightScale: 0.3 },
 };
+let LIGHT_SCALE = 0.5, LIGHT_CAP = 64;   // declared before resize() first runs
 let QL = QUALITY.high;
 
 // ---------------- Canvas ----------------
@@ -42,14 +55,16 @@ function resize() {
   resizePending = false;
   const nd = Math.min(QL.dpr, window.devicePixelRatio || 1);
   const nw = Math.round(window.innerWidth), nh = Math.round(window.innerHeight);
-  // Fit by AREA, not height: a 21:9 phone used to see ~30% more world than a
-  // 4:3 tablet, which matters on a shared daily-challenge leaderboard.
-  viewScale = Math.max(0.55, Math.min(1.7, Math.sqrt(nw * nh / VIEW_AREA)));
+  viewScale = Math.max(0.42, Math.min(1.7, Math.sqrt(nw * nh / VIEW_AREA))) / viewMul;
   viewW = nw / viewScale; viewH = nh / viewScale;
-  if (nw === cw && nh === ch && nd === dpr) return;
+  const nls = QL.lightScale || 0.5;
+  if (nw === cw && nh === ch && nd === dpr && nls === LIGHT_SCALE) return;
   cw = nw; ch = nh; dpr = nd;
   canvas.width = Math.round(cw * dpr); canvas.height = Math.round(ch * dpr);
-  lightCv.width = Math.max(1, Math.round(cw * 0.5)); lightCv.height = Math.max(1, Math.round(ch * 0.5));
+  LIGHT_SCALE = QL.lightScale || 0.5;
+  LIGHT_CAP = QL.parts >= 1 ? 64 : QL.parts >= 0.5 ? 40 : 24;
+  lightCv.width = Math.max(1, Math.round(cw * LIGHT_SCALE));
+  lightCv.height = Math.max(1, Math.round(ch * LIGHT_SCALE));
 }
 const queueResize = () => { if (!resizePending) { resizePending = true; requestAnimationFrame(resize); } };
 window.addEventListener('resize', queueResize);
@@ -80,20 +95,34 @@ window.addEventListener('keyup', e => { keys[e.code] = false; });
 const joyMove = { id: null, bx: 0, by: 0, ox: 0, oy: 0, dx: 0, dy: 0, active: false };
 const stickOnLeft = () => prefs.stickSide !== 'right';
 const isStickZone = x => stickOnLeft() ? x < cw * 0.55 : x > cw * 0.45;
-let lastStickTap = 0;
+let lastStickTap = 0, lastTapX = 0, lastTapY = 0;
 
-canvas.addEventListener('pointerdown', e => {
-  if (!G.running && !G.over) return;
-  if (!isStickZone(e.clientX)) { tryPowershot(); return; }
-  if (joyMove.id !== null) return;
-  // double-tap the movement side = dash in the current facing/move direction
-  const now = performance.now();
-  if (now - lastStickTap < 280) { tryDash(); lastStickTap = 0; } else lastStickTap = now;
+function grabStick(e) {
   joyMove.id = e.pointerId;
   joyMove.ox = joyMove.bx = e.clientX; joyMove.oy = joyMove.by = e.clientY;
   joyMove.dx = 0; joyMove.dy = 0; joyMove.active = true;
+}
+canvas.addEventListener('pointerdown', e => {
+  if (G.over) return;
+  if (!isStickZone(e.clientX)) { tryPowershot(); return; }
+  if (joyMove.id !== null) return;
+  // Double-tap to dash, but only if the second tap lands near the first —
+  // re-gripping the stick somewhere else is not a dash.
+  const now = performance.now();
+  const nearLast = Math.hypot(e.clientX - lastTapX, e.clientY - lastTapY) < 90;
+  if (now - lastStickTap < 260 && nearLast) { tryDash(); lastStickTap = 0; }
+  else { lastStickTap = now; lastTapX = e.clientX; lastTapY = e.clientY; }
+  grabStick(e);
 });
 window.addEventListener('pointermove', e => {
+  // Re-acquire a held touch. A finger already down when an overlay closes (a
+  // level-up, a chest) used to be dead until you lifted and re-pressed, which
+  // is most of why movement felt sticky between level-ups.
+  if (joyMove.id === null && e.buttons !== 0 && !G.over && G.running
+      && isStickZone(e.clientX) && e.target === canvas) {
+    grabStick(e);
+    return;
+  }
   if (e.pointerId !== joyMove.id) return;
   const max = 40 + (prefs.stickSize || 100) * 0.18;   // user-scalable throw
   let dx = e.clientX - joyMove.bx, dy = e.clientY - joyMove.by;
@@ -106,11 +135,16 @@ window.addEventListener('pointermove', e => {
     }
     dx = dx / len * max; dy = dy / len * max;
   }
-  const dz = (prefs.deadzone || 8) / 100;
+  // Deadzone defaults to 0. A touch stick has no spring and no drift, so a
+  // deadzone only adds a dead patch around the grip point — it made small
+  // corrections feel unresponsive.
+  const dz = (prefs.deadzone || 0) / 100;
   let nx = dx / max, ny = dy / max;
-  const nl = Math.hypot(nx, ny);
-  if (nl < dz) { nx = ny = 0; }
-  else if (nl < 1) { const s = (nl - dz) / (1 - dz) / nl; nx *= s; ny *= s; }
+  if (dz > 0) {
+    const nl = Math.hypot(nx, ny);
+    if (nl < dz) { nx = ny = 0; }
+    else if (nl < 1) { const s = (nl - dz) / (1 - dz) / nl; nx *= s; ny *= s; }
+  }
   joyMove.dx = nx; joyMove.dy = ny;
 });
 const joyEnd = e => {
@@ -135,7 +169,13 @@ function computeMove() {
   _mv[0] = mx; _mv[1] = my;
   return _mv;
 }
-const moveVector = () => _mv;
+// moveVector() is read by the fire/aim paths and by the renderer. It reflects
+// the live stick even on frames where update() didn't run, so the joystick
+// visual never lags the thumb.
+function moveVector() {
+  if (joyMove.active) { _mv[0] = joyMove.dx; _mv[1] = joyMove.dy; }
+  return _mv;
+}
 
 // Haptic vocabulary — consistent durations so each event has its own "feel".
 const HAPTIC = { crit: 8, tick: 12, level: 18, hurt: 26, dash: 14, cage: [18, 40, 18], power: 70, unlock: [12, 60, 12] };
@@ -250,6 +290,26 @@ function makeFighter(heroIdx, x, y) {
   return { heroIdx, x, y, fx: 1, ws: makeWS(heroIdx), bob: Math.random() * 6.28 };
 }
 function maxHP() { return HEROES[player.heroIdx].hp + G.mods.hpBonus; }
+
+// ---------------- Frame profiler ----------------
+// Cheap, opt-in section timing. Enabled with __balitopia.prof(true); results in
+// __balitopia.profData(). Off by default: the marks compile to a bare boolean
+// test, so there is no cost in normal play.
+const PROF = { on: false, acc: {}, n: 0, t0: 0, cur: null };
+function pStart(k) { if (!PROF.on) return; PROF.cur = k; PROF.t0 = performance.now(); }
+function pEnd() {
+  if (!PROF.on || !PROF.cur) return;
+  const d = performance.now() - PROF.t0;
+  PROF.acc[PROF.cur] = (PROF.acc[PROF.cur] || 0) + d;
+  PROF.cur = null;
+}
+function profReport() {
+  const out = {};
+  const n = Math.max(1, PROF.n);
+  for (const k in PROF.acc) out[k] = +(PROF.acc[k] / n).toFixed(2);
+  out.__frames = PROF.n;
+  return out;
+}
 
 // ---------------- Decor grid ----------------
 const DECOR_CELL = 512;
@@ -465,7 +525,7 @@ function heraldEnemy(type) {
 
 // ---------------- Damage ----------------
 function addFloater(x, y, txt, color, scale) {
-  if (floaters.length > 44) floaters.shift();
+  if (floaters.length > 26) floaters.shift();
   floaters.push({ x, y, txt, color, t: 0, s: scale || 1 });
 }
 // Repeated hits on the same enemy within 0.22s accumulate into ONE rising
@@ -479,7 +539,7 @@ function addAggFloater(e, dmg, color) {
     return;
   }
   const nf = { x: e.x + (Math.random() - 0.5) * 10, y: bodyY(e) - e.r - 8, txt: dmg, color, t: 0, s: 1, acc: dmg };
-  if (floaters.length > 44) floaters.shift();
+  if (floaters.length > 26) floaters.shift();
   floaters.push(nf); e._fl = nf;
 }
 // Particle kinds: spark (stretched to velocity), puff (soft additive), shard
@@ -1512,7 +1572,13 @@ function updateBoss(dt) {
     const pull = 210 * dt;
     player.x -= dx / d * pull; player.y -= dy / d * pull;
     if (d < b.r + 60) hurtPlayer(b.dmg * 0.5, 'the Gorge');
-    eachEnemyNear(b.x, b.y, 600, e => { e.kbx -= (e.x - b.x) * 0.6; e.kby -= (e.y - b.y) * 0.6; });
+    // was a 600px sweep every frame (~200 hash cells); the pull only needs to
+    // read near the player, and only a few times a second
+    b.gorgeTick = (b.gorgeTick || 0) - dt;
+    if (b.gorgeTick <= 0) {
+      b.gorgeTick = 0.2;
+      eachEnemyNear(player.x, player.y, 320, e => { e.kbx -= (e.x - b.x) * 0.5; e.kby -= (e.y - b.y) * 0.5; });
+    }
   }
 
   // ---- CROWN SPLIT (phase 2): destroy the fragments or he heals.
@@ -1526,9 +1592,12 @@ function updateBoss(dt) {
   }
   if (b.crowns.length) {
     b.crownT -= dt;
+    b.crownTick = (b.crownTick || 0) - dt;
+    const scanCrowns = b.crownTick <= 0;
+    if (scanCrowns) b.crownTick = 0.1;
     for (const c of b.crowns) {
       if (!c.alive) continue;
-      eachProjNear(c.x, c.y, 34, p => { c.hp -= p.dmg; p.alive = false; });
+      if (scanCrowns) eachProjNear(c.x, c.y, 34, p => { c.hp -= p.dmg; p.alive = false; });
       if (c.hp <= 0) { c.alive = false; spawnParts(c.x, c.y, '#ffd54f', 18, 200, 'shard'); Sound.sfx.wardBreak(); }
     }
     const left = b.crowns.filter(c => c.alive).length;
@@ -2135,7 +2204,7 @@ function gainXP(v) {
 }
 
 // ---------------- Main update ----------------
-let last = 0, rafId = 0, fpsAcc = 0, fpsN = 0, benchFrames = 0, adaptAcc = 0, adaptN = 0;
+let last = 0, rafId = 0, fpsAcc = 0, fpsN = 0, benchFrames = 0, adaptAcc = 0, adaptN = 0, goodStreak = 0;
 const MENU_IDS = ['screen-title', 'screen-story', 'screen-select', 'screen-records', 'screen-shop',
   'screen-settings', 'screen-howto', 'screen-over', 'screen-roster', 'screen-levelup', 'screen-chest', 'screen-mutator'];
 function anyOverlayOpen() {
@@ -2166,8 +2235,17 @@ function frame(ts) {
       adaptAcc = 0; adaptN = 0;
       if (fps < 44 && QL !== QUALITY.battery) {
         applyQuality(QL === QUALITY.high ? 'balanced' : 'battery');
+        goodStreak = 0;
         banner('⚙ QUALITY LOWERED FOR SMOOTHNESS — change it in Settings');
-      }
+      } else if (fps > 57 && QL !== QUALITY.high) {
+        // Step back up, but only after a sustained comfortable stretch — the
+        // device heuristic starts phones low, and a strong phone shouldn't be
+        // stuck there. Never oscillates: one downgrade resets the streak.
+        if (++goodStreak >= 5) {
+          goodStreak = 0;
+          applyQuality(QL === QUALITY.battery ? 'balanced' : 'high');
+        }
+      } else goodStreak = 0;
     }
   }
   // Crash recovery: an exception inside the loop used to kill the rAF chain
@@ -2200,8 +2278,20 @@ function hitStop(dur) { if (prefs.motion) G.hitStop = Math.max(G.hitStop || 0, d
 
 function autoQuality(fps) {
   if (prefs.quality && prefs.quality !== 'auto') return;
-  const q = fps < 42 ? 'battery' : fps < 55 ? 'balanced' : 'high';
-  if (q !== 'high') { applyQuality(q); banner(`⚙ ${q.toUpperCase()} QUALITY — adjust in Settings`); }
+  const q = fps < 40 ? 'battery' : fps < 54 ? 'balanced' : 'high';
+  const cur = QL === QUALITY.high ? 'high' : QL === QUALITY.balanced ? 'balanced' : 'battery';
+  if (q !== cur) { applyQuality(q); if (q !== 'high') banner(`⚙ ${q.toUpperCase()} QUALITY — adjust in Settings`); }
+}
+// Touch devices begin on `balanced` rather than benchmarking down from `high`:
+// the first 300 frames of a run are exactly when a bad frame rate does the most
+// damage, and a phone almost never sustains the high preset anyway.
+function initialQuality() {
+  if (prefs.quality && prefs.quality !== 'auto') return prefs.quality;
+  const touch = matchMedia('(pointer: coarse)').matches || navigator.maxTouchPoints > 1;
+  const cores = navigator.hardwareConcurrency || 4;
+  const mem = navigator.deviceMemory || 4;
+  if (!touch) return 'high';
+  return (cores <= 4 || mem <= 3) ? 'battery' : 'balanced';
 }
 function applyQuality(name) {
   QL = QUALITY[name] || QUALITY.high;
@@ -2209,6 +2299,7 @@ function applyQuality(name) {
 }
 
 function update(dt) {
+  pStart('update');
   G.time += dt;
   G.frameN++;
   const m = G.mods;
@@ -2289,9 +2380,17 @@ function update(dt) {
   G.cam.y += (G.cam.ty - G.cam.y) * Math.min(1, 6.5 * dt);
   const busy = (G.boss && G.boss.alive) ? 1.1 : Math.min(1.08, 1 + G.liveEnemies / 3000);
   G.cam.zoom += (busy - G.cam.zoom) * Math.min(1, 1.6 * dt);
+  // widen the view as the squad grows — eased, so a cage break opens the camera
+  // rather than snapping it
+  viewMulTarget = 1 + Math.min(VIEW_FREED_CAP, (freedSet.size - 1) * VIEW_PER_FREED);
+  if (Math.abs(viewMul - viewMulTarget) > 0.0005) {
+    viewMul += (viewMulTarget - viewMul) * Math.min(1, 1.1 * dt);
+    resize();
+  }
   G.shake = Math.max(0, G.shake - 30 * dt);
 
   updateHud(dt);
+  pEnd();
 }
 
 // ================================================================
@@ -2418,9 +2517,13 @@ function shadow(x, y, w) {
 
 function render(dt) {
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  ctx.fillStyle = '#0b3d24';
-  ctx.fillRect(0, 0, cw, ch);
-  if (!player) return;
+  if (!player) {
+    ctx.fillStyle = '#0b3d24';
+    ctx.fillRect(0, 0, cw, ch);
+    return;
+  }
+  // No clear: the ground pass below covers every pixel and the context is
+  // alpha:false, so clearing first is a wasted full-screen fill.
 
   // Directional trauma: shake along the impact axis with a decaying oscillation,
   // instead of one symmetric noise for every event in the game.
@@ -2436,6 +2539,7 @@ function render(dt) {
   const camX = G.cam.x - vw / 2 + shx, camY = G.cam.y - vh / 2 + shy;
   ctx.setTransform(dpr * zs, 0, 0, dpr * zs, -camX * dpr * zs, -camY * dpr * zs);
 
+  pEnd(); pStart('ground');
   // ---- ground: seamless base + a 768px overlay at a different period so the
   // eye can't lock onto a repeating grid (the old 256px tile was plainly visible)
   const biome = G.region ? G.region.split('-')[1] : 'land';
@@ -2451,6 +2555,7 @@ function render(dt) {
 
   const onScreen = (x, y, pad) => x > camX - pad && x < camX + vw + pad && y > camY - pad && y < camY + vh + pad;
 
+  pEnd(); pStart('decor');
   // ---- decor ----
   // Bucketed into a coarse grid so raising density from 150 to ~900 props costs
   // a handful of cell lookups instead of 900 per-item visibility tests.
@@ -2469,6 +2574,7 @@ function render(dt) {
     }
   }
 
+  pEnd(); pStart('world');
   // ---- ground pools (undertow / mines / volatile) ----
   for (const pl of pools) {
     if (!onScreen(pl.x, pl.y, 80)) continue;
@@ -2587,6 +2693,7 @@ function render(dt) {
     ctx.drawImage(hs, h.x - 11, h.y - 10 + Math.sin(G.time * 4 + h.x) * 3);
   }
 
+  pEnd(); pStart('enemies');
   // ---- enemies ----
   // Rewritten as a batched, depth-sorted pass. Status effects are pre-baked
   // sprites (they used to cost 6-9 beginPath/fill pairs each, per enemy, per
@@ -2696,6 +2803,7 @@ function render(dt) {
       ctx.fillRect(e.x - (e.tier - 1) * 3 + k * 6, e.y - e.dh * e.scale + 2, 3, 3);
   }
 
+  pEnd(); pStart('auras');
   // ---- auras (under fighters) ----
   // Aura visuals now come from the SAME resolver the damage path uses, so
   // Gus's "+40% radius" actually grows the ring instead of silently widening an
@@ -2756,6 +2864,7 @@ function render(dt) {
   }
 
   // ---- fighters ----
+  pEnd(); pStart('fighters');
   const drawFighter = (f, isPlayer, dim) => {
     if (!onScreen(f.x, f.y, 60)) return;
     const spr = Sprites.get('body' + f.heroIdx);
@@ -2886,6 +2995,7 @@ function render(dt) {
   drawBoss(G.boss);
   drawBoss(G.boss2);
 
+  pEnd(); pStart('projs');
   // ---- projectiles: oriented, per-archetype sprites with trails ----
   for (const p of projs) {
     if (!p.alive || !onScreen(p.x, p.y, 40)) continue;
@@ -2916,6 +3026,7 @@ function render(dt) {
     ctx.drawImage(ebs, eb.x - ebs.width / 2, eb.y - ebs.height / 2);
   }
 
+  pEnd(); pStart('effects');
   // ---- effects ----
   for (const fx of effects) {
     const p = 1 - fx.t / fx.dur;
@@ -3074,10 +3185,12 @@ function render(dt) {
     ctx.globalAlpha = 1;
   }
 
+  pEnd(); pStart('parts');
   // ---- particles: spark / puff / shard / ring, not untextured squares ----
   const glowW = Sprites.get('glowW');
   for (const p of parts) {
     if (!p.alive) continue;
+    if (!onScreen(p.x, p.y, 30)) continue;
     const a = 1 - p.t / p.dur;
     ctx.globalAlpha = a;
     if (p.kind === 'puff') {
@@ -3105,24 +3218,33 @@ function render(dt) {
   }
   ctx.globalAlpha = 1;
 
+  pEnd(); pStart('light');
   // ---- lighting: ambient shade + coloured emitters ----
-  if (QL.light) { gatherLights(onScreen); drawLightLayer(camX, camY, zs, onScreen); }
+  if (QL.light) { gatherLights(onScreen); drawLightLayer(camX, camY, zs); }
 
+  pEnd(); pStart('floaters');
   // ---- floaters ----
-  ctx.textAlign = 'center';
-  for (const fl of floaters) {
-    const a = 1 - fl.t / 0.8;
-    ctx.globalAlpha = a;
-    const sz = Math.round(15 * fl.s);
-    ctx.font = `bold ${sz}px "Trebuchet MS",sans-serif`;
-    const ry = fl.y - fl.t * 40 - (fl.s > 1.3 ? fl.t * 14 : 0);
-    ctx.fillStyle = '#000';
-    ctx.fillText(fl.txt, fl.x + 1.5, ry + 1.5);
-    ctx.fillStyle = fl.color;
-    ctx.fillText(fl.txt, fl.x, ry);
+  // Text draws are the most expensive per-item work in the frame. Bucket the
+  // size so ctx.font changes a few times instead of once per number, cull
+  // off-screen, and drop the drop-shadow pass under a heavy horde.
+  if (floaters.length) {
+    ctx.textAlign = 'center';
+    const cheap = floaters.length > 18;
+    let curSz = -1;
+    for (const fl of floaters) {
+      if (!onScreen(fl.x, fl.y, 40)) continue;
+      const sz = fl.s > 1.3 ? 20 : 15;
+      if (sz !== curSz) { curSz = sz; ctx.font = `bold ${sz}px "Trebuchet MS",sans-serif`; }
+      ctx.globalAlpha = 1 - fl.t / 0.8;
+      const ry = fl.y - fl.t * 40 - (fl.s > 1.3 ? fl.t * 14 : 0);
+      if (!cheap) { ctx.fillStyle = '#000'; ctx.fillText(fl.txt, fl.x + 1.5, ry + 1.5); }
+      ctx.fillStyle = fl.color;
+      ctx.fillText(fl.txt, fl.x, ry);
+    }
+    ctx.globalAlpha = 1;
   }
-  ctx.globalAlpha = 1;
 
+  pEnd(); pStart('hud2');
   // ---- edge arrows (screen space): nearest cage (gold) + King Glob (red) ----
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   const edgeArrow = (tx, ty, minDist, color, ring, label) => {
@@ -3177,16 +3299,32 @@ function render(dt) {
   if (player && G.running && !G.over && player.hp < maxHP() * 0.3)
     danger = Math.max(danger, 0.16 + Math.sin(G.time * 5) * 0.08);
   if (danger > 0) {
-    const vg = ctx.createRadialGradient(cw / 2, ch / 2, Math.min(cw, ch) * 0.36, cw / 2, ch / 2, Math.max(cw, ch) * 0.62);
-    vg.addColorStop(0, 'rgba(200,0,0,0)');
-    vg.addColorStop(1, `rgba(200,10,10,${Math.min(0.55, danger)})`);
-    ctx.fillStyle = vg;
-    ctx.fillRect(0, 0, cw, ch);
+    // cached: this used to allocate a gradient every frame at low HP
+    if (!vignetteCv || vignetteCv.width !== cw || vignetteCv.height !== ch) buildVignette();
+    ctx.globalAlpha = Math.min(1, danger / 0.55);
+    ctx.drawImage(vignetteCv, 0, 0, cw, ch);
+    ctx.globalAlpha = 1;
   }
 
   // ---- minimap + surge warning (screen space) ----
   if (G.running && !G.over && prefs.minimap) drawMinimap();
   if (G.running && !G.over) drawSurgeWarning();
+  pEnd();
+  if (PROF.on) PROF.n++;
+}
+
+// Pre-rendered danger vignette. Rebuilt only when the viewport changes.
+let vignetteCv = null;
+function buildVignette() {
+  vignetteCv = vignetteCv || document.createElement('canvas');
+  vignetteCv.width = Math.max(1, cw); vignetteCv.height = Math.max(1, ch);
+  const v = vignetteCv.getContext('2d');
+  const g = v.createRadialGradient(cw / 2, ch / 2, Math.min(cw, ch) * 0.36, cw / 2, ch / 2, Math.max(cw, ch) * 0.62);
+  g.addColorStop(0, 'rgba(200,0,0,0)');
+  g.addColorStop(1, 'rgba(200,10,10,0.55)');
+  v.clearRect(0, 0, cw, ch);
+  v.fillStyle = g;
+  v.fillRect(0, 0, cw, ch);
 }
 
 // A real coastline instead of a 20px stroked rectangle.
@@ -3249,46 +3387,57 @@ function ambientColor() {
 // Emitters are collected during the world pass, then drawn in one batch.
 let lights = [], lightN = 0;
 function emitLight(x, y, r, color, a) {
-  if (!QL.light || lightN >= 90) return;
+  if (!QL.light || lightN >= LIGHT_CAP) return;
   const L = lights[lightN] || (lights[lightN] = {});
   L.x = x; L.y = y; L.r = r; L.c = color; L.a = a;
   lightN++;
 }
 
-function drawLightLayer(camX, camY, zs, onScreen) {
-  // --- 1. ambient shade (multiply): this is what makes lights read at all ---
+// Single-pass LIGHT MAP.
+// The previous version did two full-screen operations: an ambient `multiply`
+// fill, then an additive composite of the light buffer. Full-screen fills are
+// the dominant frame cost on a phone, so this builds one buffer that already
+// contains both — clear to the ambient colour, add the emitters into it, then
+// composite once with `multiply`. Unlit ground is tinted and darkened; lit
+// areas multiply by ~white and come back to their true colour instead of
+// blowing out. Half the fill cost and it looks better.
+function drawLightLayer(camX, camY, zs) {
   const p = ambientPhase();
-  if (p > 0.02) {
-    const [r, g, b] = ambientColor();
-    ctx.save();
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    ctx.globalCompositeOperation = 'multiply';
-    ctx.fillStyle = `rgb(${r},${g},${b})`;
-    ctx.fillRect(0, 0, cw, ch);
-    ctx.restore();
-  }
+  // In bright daylight with nothing dramatic on screen the map is a no-op —
+  // skip the entire pass rather than multiplying by white.
+  if (p < 0.06 && lightN === 0) { lightN = 0; return; }
 
-  // --- 2. coloured additive emitters, at half resolution ---
-  const L = lightCtx, k = 0.5;
+  const L = lightCtx, k = LIGHT_SCALE;
+  const [ar, ag, ab] = ambientColor();
   L.setTransform(1, 0, 0, 1, 0, 0);
-  L.clearRect(0, 0, lightCv.width, lightCv.height);
+  L.globalCompositeOperation = 'source-over';
+  L.fillStyle = `rgb(${ar},${ag},${ab})`;
+  L.fillRect(0, 0, lightCv.width, lightCv.height);
+
   L.setTransform(zs * k, 0, 0, zs * k, -camX * zs * k, -camY * zs * k);
   L.globalCompositeOperation = 'lighter';
-  // brighter emitters when the world is darker, so the balance holds all run
   const boost = 0.55 + p * 0.85;
   for (let i = 0; i < lightN; i++) {
     const e = lights[i];
-    const spr = Sprites.light(e.c);
     L.globalAlpha = Math.min(1, e.a * boost);
-    L.drawImage(spr, e.x - e.r, e.y - e.r, e.r * 2, e.r * 2);
+    L.drawImage(Sprites.light(e.c), e.x - e.r, e.y - e.r, e.r * 2, e.r * 2);
   }
   L.globalAlpha = 1;
   L.globalCompositeOperation = 'source-over';
+
   ctx.save();
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  ctx.globalCompositeOperation = 'lighter';
+  // The single most important line in the renderer. Compositing the light
+  // buffer full-screen WITH smoothing costs ~21ms on a throttled device — the
+  // entire frame budget, for one operation. Bilinear-filtering a million pixels
+  // is the whole cost. With smoothing off it is ~4.6ms, a 4.6x win, and a light
+  // map is nothing but smooth gradients so nearest-neighbour upscaling of it is
+  // visually indistinguishable.
+  ctx.imageSmoothingEnabled = false;
+  ctx.globalCompositeOperation = 'multiply';
   ctx.drawImage(lightCv, 0, 0, cw, ch);
   ctx.globalCompositeOperation = 'source-over';
+  ctx.imageSmoothingEnabled = true;
   ctx.restore();
   lightN = 0;
 }
@@ -3408,7 +3557,11 @@ const hudCache = {};   // skip DOM writes when the value hasn't changed
 function setHud(id, prop, val) {
   if (hudCache[id] === val) return;
   hudCache[id] = val;
-  if (prop === 'w') $(id).style.width = val; else $(id).textContent = val;
+  if (prop === 'w') {
+    // scaleX instead of width: width relayouts and repaints the bar every tick,
+    // a transform is handled by the compositor
+    $(id).style.transform = `scaleX(${parseFloat(val) / 100})`;
+  } else $(id).textContent = val;
 }
 function updateHud(dt) {
   hudTick -= dt;
@@ -3572,8 +3725,11 @@ function updateStrip() {
     const cls = `facecard tier${hs.tier}` + (hs.charge >= 1 ? ' ready' : '') + (active ? ' active' : '');
     if (els.cls !== cls) { els.cls = cls; els.card.className = cls; }
     const barW = Math.round(Math.min(100, hs.charge * 100)) + '%';
-    if (els.barW !== barW) { els.barW = barW; els.bar.style.width = barW; }
-    if (active) {
+    if (els.barW !== barW) { els.barW = barW; els.bar.style.transform = `scaleX(${parseFloat(barW) / 100})`; }
+    // The idle video only runs on the full-quality preset. It is a per-frame
+    // video decode and composite for a 46px card, which is a poor trade on a
+    // phone mid-combat; the static portrait underneath reads the same.
+    if (active && QL.parts >= 1 && !prefs.motionLite) {
       const v = getStripVideo();
       if (v.parentElement !== els.card || v.dataset.hero !== HEROES[idx].id) {
         v.dataset.hero = HEROES[idx].id;
@@ -3582,6 +3738,10 @@ function updateStrip() {
         els.card.appendChild(v);
         v.play().catch(() => {});
       }
+    } else if (stripVideo && stripVideo.parentElement === els.card) {
+      stripVideo.pause();
+      stripVideo.remove();
+      stripVideo.dataset.hero = '';
     }
   }
 }
@@ -4162,7 +4322,7 @@ function newGame(heroIdx, diffIdx, daily) {
   G.possessedOther = false;
   G.round = 1; G.bossKills = 0; G.nextBossAt = BOSS_TIME;
   G.rerolls = 3 + (daily ? 0 : ((save.perks || {}).fortune || 0));
-  G.cam.zoom = 1;
+  G.cam.zoom = 1; viewMul = 1; viewMulTarget = 1;
   heroState = HEROES.map(() => ({ dmg: 0, tier: 0, charge: 0, kills: 0, control: 0 }));
   heroMods = HEROES.map(freshHeroMod);
   powerWaves = []; relics = []; timers = []; overlayQ = [];
@@ -5086,7 +5246,7 @@ const confirmModal = (title, body, onYes, yesLabel) =>
 // ---------------- Preferences ----------------
 const PREF_DEFAULTS = {
   musicVol: 80, sfxVol: 100, haptics: 1, motion: 1, colorblind: 0, uiscale: 100, minimap: 1,
-  stickSide: 'left', stickType: 'float', stickSize: 100, deadzone: 8,
+  stickSide: 'left', stickType: 'float', stickSize: 100, deadzone: 0,
   quality: 'auto', fpsCap: 60, shake: 100, flash: 100, dmgnum: 'all', cvd: 'none', assist: 0, dayNight: 100,
 };
 let prefs = { ...PREF_DEFAULTS };
@@ -5102,7 +5262,7 @@ function applyPrefs() {
   document.body.classList.toggle('stick-right', prefs.stickSide === 'right');
   document.body.dataset.cvd = prefs.cvd || 'none';
   document.documentElement.style.setProperty('--ui-scale', prefs.uiscale / 100);
-  if (prefs.quality && prefs.quality !== 'auto') applyQuality(prefs.quality);
+  applyQuality(initialQuality());
 }
 function savePrefs() {
   const save = loadSave();
@@ -5431,7 +5591,10 @@ window.__balitopia = {
   addRelic, tryDash, tryPowershot, spawnElite, fireBeat, spawnChest, openChest,
   cycleFormation, showMutatorDraft, showChest, computeScore, effWeapon, bodyY,
   loadSave, saveGame, flushSave, nextGoals, runContext, checkUnlocks, isUnlocked,
-  applyQuality, coach, showModal, allyFalloff, ambientPhase, ambientColor, heroState: () => heroState,
+  applyQuality, coach, showModal, allyFalloff,
+  getQL: () => QL, viewInfo: () => ({ w: Math.round(viewW), h: Math.round(viewH), mul: +viewMul.toFixed(3) }),
+  setQL: q => { QL = q; resize(); },
+  prof: v => { PROF.on = v; PROF.acc = {}; PROF.n = 0; }, profData: profReport, ambientPhase, ambientColor, heroState: () => heroState,
 };
 
 })();

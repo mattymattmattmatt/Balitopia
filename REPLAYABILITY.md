@@ -270,3 +270,100 @@ accents and weapon colours), and the impact/muzzle emitters are budgeted so a
 
 Performance held throughout: 60 fps early, 57 at 150 enemies, 53 at 300, 53
 with 300 + 23 allies + relics, and 60 on the battery preset.
+
+---
+
+# Performance, camera & controls pass
+
+Driven by real device feedback: *"gets really laggy on my phone, a bit too
+zoomed, and the controls don't feel as fluid as they used to."* All three were
+real, and two of them were regressions I introduced.
+
+## Performance — the frame was never JS-bound
+
+Section-profiling the renderer (`__balitopia.prof(true)`) showed only 3–12 ms of
+JavaScript per frame even at 300 enemies. The cost was **fill rate**, so the
+optimisations that mattered were all about pixels, not code.
+
+A micro-benchmark of the individual canvas operations at a real canvas size,
+under 3× CPU throttling, found the culprit immediately:
+
+| operation | cost |
+|---|---:|
+| full-screen `drawImage` of the light buffer, **smoothed** | **21.3 ms** |
+| the same `drawImage`, **`imageSmoothingEnabled = false`** | **4.6 ms** |
+| full-screen `multiply` fillRect | 3.4 ms |
+| 90 individual additive lights drawn directly | 182 ms |
+
+One flag on the light composite was a **4.6× win**. Bilinear-filtering a million
+pixels was the entire cost, and a light map is nothing but smooth gradients, so
+nearest-neighbour upscaling is visually indistinguishable. The same benchmark
+also confirmed the light-*map* approach is correct: drawing lights directly to
+the screen is catastrophically worse.
+
+**What changed**
+
+- **Light composite: smoothing off.** The single most important line in the renderer.
+- **Single-pass light map.** Was two full-screen ops (an ambient `multiply` fill,
+  then an additive composite). Now the buffer is cleared to the ambient colour,
+  emitters are added into it, and it composites once with `multiply`. Half the
+  fill, and lit areas return to their true colour instead of blowing out to white.
+- **DPR cut** from 1.75 to 1.3 / 1.05 / 0.9 across the presets — it scales every
+  full-screen fill quadratically and the art is soft and painted, not pixel art.
+- **Redundant background clear removed** — the ground pass covers every pixel and
+  the context is `alpha:false`.
+- **Low-HP vignette cached.** It rebuilt a `createRadialGradient` *every frame*
+  it was visible, which is every frame below 30% HP.
+- **Face-card idle video** no longer runs during gameplay below the high preset —
+  it was a per-frame video decode and composite for a 46 px card.
+- **HUD bars animate `transform: scaleX` instead of `width`**, so a HUD tick
+  composites instead of triggering layout and paint; HUD subtrees get `contain`.
+- **Boss queries throttled.** The Gorge swept a 600 px radius (~200 hash cells)
+  every frame; crown fragments scanned all 400 projectile slots each. Both now
+  tick a few times a second against a much smaller radius.
+- **Floaters** bucket their font size, cull off-screen, and drop the shadow pass
+  under a heavy horde. **Particles** were drawn with no visibility test at all.
+- **Phones start on a lower preset** from a device heuristic rather than
+  benchmarking down from `high`, and adaptive quality can now step back *up*
+  after a sustained comfortable stretch so a strong phone isn't stuck low.
+
+**Result** — identical scenario (300 enemies + 20 allies, 3× CPU throttle):
+
+| | before | after |
+|---|---:|---:|
+| high preset | 6.7 fps | 15.5 fps |
+| balanced (auto-selected on most phones) | — | **18.6 fps** |
+| battery | — | 22.5 fps |
+
+Section timings for the worst case (300 enemies + boss + night) fell from
+11.8 ms/frame of accounted JS to 4.3 ms: `update` 4.14 → 0.76, `light`
+2.21 → 1.01, `floaters` 0.99 → 0.11.
+
+## Camera — wider, and it opens up as the squad grows
+
+The area-based fit was set tighter than the old fixed-height framing. Raised
+from 540k to 760k px², which is ~19% wider than the previous pass and ~10%
+wider than the game's original framing.
+
+On top of that, **the view widens as you free Guardians** — +1.6% per Guardian
+up to +30%, eased so a cage break opens the camera rather than snapping it. A
+24-strong squad plus its projectiles simply needs more screen than a lone
+Guardian does. Measured: 1282×593 world px at the start of a run, 1534×709 with
+a full roster.
+
+## Controls — undoing my own regressions
+
+- **The dash button was sitting in the movement thumb zone.** Bottom-left is
+  exactly where the left thumb rests, so a natural thumb-down hit the button
+  instead of the stick and fired random dashes. Both action buttons now live on
+  the action side, leaving the whole movement half clear.
+- **Deadzone now defaults to 0** (was 8%). A touch stick has no spring and no
+  drift, so a deadzone only adds a dead patch around the grip point — it made
+  small corrections feel unresponsive.
+- **A held touch is re-acquired.** A finger already down when an overlay closed
+  (a level-up, a chest) was dead until you lifted and re-pressed. That is most
+  of why movement felt sticky between level-ups.
+- **Double-tap-to-dash now requires the taps to land near each other**, so
+  re-gripping the stick somewhere else is not a dash.
+- **`moveVector()` reads the live stick**, so the joystick never lags the thumb
+  on frames where the simulation didn't step (hit-stop, time dilation).

@@ -458,26 +458,29 @@ html, body {
 .diff-chip.locked { opacity:.45; cursor:default; }
 
 /* ============ HUD ============ */
-#hud { position:fixed; inset:0; z-index:10; pointer-events:none;
+#hud { position:fixed; inset:0; z-index:10; pointer-events:none; contain:layout style;
   padding:calc(6px + env(safe-area-inset-top)) calc(8px + env(safe-area-inset-right)) 6px calc(8px + env(safe-area-inset-left)); }
 
-#hud-top-left { position:absolute; top:calc(6px + env(safe-area-inset-top)); left:calc(10px + env(safe-area-inset-left)); width:170px; }
+#hud-top-left { contain:layout style paint; position:absolute; top:calc(6px + env(safe-area-inset-top)); left:calc(10px + env(safe-area-inset-left)); width:170px; }
 #hp-wrap, #xp-wrap { position:relative; height:16px; border-radius:8px; background:rgba(0,0,0,.55); border:1px solid rgba(255,255,255,.25); overflow:hidden; margin-bottom:4px; }
 #xp-wrap { height:10px; }
-#hp-bar { height:100%; width:100%; background:linear-gradient(#ff8a65,#e53935); border-radius:8px; transition:width .15s; }
-#xp-bar { height:100%; width:0%; background:linear-gradient(#b2ff59,#43a047); border-radius:8px; transition:width .15s; }
+#hp-bar { height:100%; width:100%; background:linear-gradient(#ff8a65,#e53935); border-radius:8px;
+  transform-origin:left center; will-change:transform; }
+#xp-bar { height:100%; width:100%; background:linear-gradient(#b2ff59,#43a047); border-radius:8px;
+  transform:scaleX(0); transform-origin:left center; will-change:transform; }
 #hp-text, #lvl-text { position:absolute; inset:0; font-size:9px; font-weight:bold; text-align:center; line-height:15px; text-shadow:0 1px 2px #000; }
 #lvl-text { line-height:10px; font-size:8px; }
 
-#hud-top-center { position:absolute; top:calc(4px + env(safe-area-inset-top)); left:50%; transform:translateX(-50%); text-align:center; }
+#hud-top-center { contain:layout style; position:absolute; top:calc(4px + env(safe-area-inset-top)); left:50%; transform:translateX(-50%); text-align:center; }
 #timer { font-size:22px; font-weight:bold; color:#fff; text-shadow:0 2px 4px #000; letter-spacing:2px; }
 #boss-eta { font-size:10px; font-weight:bold; letter-spacing:2px; color:#ff8a80; text-shadow:0 1px 3px #000; animation:etaPulse 1.4s ease-in-out infinite alternate; }
 @keyframes etaPulse { from { opacity:.55; } to { opacity:1; } }
 #boss-hp-wrap { position:relative; width:min(46vw,340px); height:13px; margin:2px auto 0; background:rgba(0,0,0,.6); border:1px solid #ff5252; border-radius:7px; overflow:hidden; }
-#boss-hp-bar { height:100%; width:100%; background:linear-gradient(#ff8a80,#c62828); }
+#boss-hp-bar { height:100%; width:100%; background:linear-gradient(#ff8a80,#c62828);
+  transform-origin:left center; will-change:transform; }
 #boss-hp-wrap span { position:absolute; inset:0; font-size:8px; font-weight:bold; letter-spacing:2px; line-height:12px; text-align:center; color:#fff; text-shadow:0 1px 2px #000; }
 
-#hud-top-right { position:absolute; top:calc(6px + env(safe-area-inset-top)); right:calc(10px + env(safe-area-inset-right)); display:flex; gap:8px; align-items:center; pointer-events:auto; }
+#hud-top-right { contain:layout style paint; position:absolute; top:calc(6px + env(safe-area-inset-top)); right:calc(10px + env(safe-area-inset-right)); display:flex; gap:8px; align-items:center; pointer-events:auto; }
 #kills, #freed { font-size:13px; font-weight:bold; color:#fff; text-shadow:0 1px 3px #000; background:rgba(0,0,0,.4); padding:3px 8px; border-radius:10px; }
 #btn-roster, #btn-mute {
   width:38px; height:38px; border-radius:50%; border:2px solid rgba(255,255,255,.5);
@@ -529,7 +532,8 @@ html, body {
 .facecard .fc-bar {
   position:absolute; left:0; right:0; bottom:0; height:5px; background:rgba(0,0,0,.65); z-index:2;
 }
-.facecard .fc-bar i { display:block; height:100%; width:0; background:linear-gradient(90deg,#80cbc4,#ffd54f); transition:width .2s; }
+.facecard .fc-bar i { display:block; height:100%; width:100%; background:linear-gradient(90deg,#80cbc4,#ffd54f);
+  transform:scaleX(0); transform-origin:left center; }
 .facecard.ready .fc-bar i { background:linear-gradient(90deg,#fff,var(--glow,#ffd54f)); }
 .facecard .fc-video {
   position:absolute; inset:0; width:100%; height:100%; object-fit:cover; pointer-events:none; z-index:1;
@@ -614,7 +618,8 @@ body.reduce-motion #coach { animation:none; }
 #combo b { font-size:clamp(15px,3.4vh,22px); color:#ffd54f; text-shadow:0 2px 4px #000; line-height:1; }
 #combo span { font-size:9px; color:#b7dcd3; letter-spacing:1px; }
 #combo-track { width:70px; height:3px; background:rgba(0,0,0,.5); border-radius:2px; overflow:hidden; }
-#combo-bar { height:100%; background:linear-gradient(90deg,#ffd54f,#ff8a65); width:100%; }
+#combo-bar { height:100%; background:linear-gradient(90deg,#ffd54f,#ff8a65); width:100%;
+  transform-origin:left center; will-change:transform; }
 .bhp-tick { position:absolute; top:0; bottom:0; width:2px; background:rgba(0,0,0,.55); }
 
 /* Dash + powershot: real buttons in the thumb zones, with radial fills.
@@ -627,13 +632,19 @@ body.reduce-motion #coach { animation:none; }
   color:#fff; font-size:22px; overflow:hidden; padding:0;
   display:flex; align-items:center; justify-content:center;
 }
-#dash-btn { left:calc(14px + env(safe-area-inset-left)); }
+/* BOTH action buttons live on the action side. Dash used to sit bottom-left —
+   exactly where the movement thumb rests — so a natural thumb-down hit the
+   button instead of the stick and fired random dashes. The whole movement half
+   is now clear. */
 #ps-btn   { right:calc(14px + env(safe-area-inset-right)); }
-body.stick-right #dash-btn { left:auto; right:calc(14px + env(safe-area-inset-right)); }
+#dash-btn { right:calc(20px + env(safe-area-inset-right)); bottom:calc(128px + env(safe-area-inset-bottom));
+  width:50px; height:50px; font-size:19px; }
 body.stick-right #ps-btn   { right:auto; left:calc(14px + env(safe-area-inset-left)); }
+body.stick-right #dash-btn { right:auto; left:calc(20px + env(safe-area-inset-left)); }
 #dash-btn span, #ps-btn span { position:relative; z-index:2; text-shadow:0 1px 3px #000; }
 #dash-btn i, #ps-btn i {
-  position:absolute; left:0; bottom:0; width:0; height:100%; z-index:1;
+  position:absolute; left:0; bottom:0; width:100%; height:100%; z-index:1;
+  transform:scaleX(0); transform-origin:left center; will-change:transform;
   background:linear-gradient(rgba(128,203,196,.45), rgba(128,203,196,.18));
 }
 #ps-btn i { background:linear-gradient(rgba(255,213,79,.5), rgba(255,138,101,.22)); }
@@ -792,7 +803,10 @@ body.reduce-motion .hero-unlocked span, body.reduce-motion #ps-btn.ready { anima
 @media (max-height:520px) and (orientation:landscape) {
   #roster-build { margin-bottom:3px; }
   .rb-stat b { font-size:11px; }
-  #dash-btn, #ps-btn { width:50px; height:50px; font-size:19px; bottom:calc(54px + env(safe-area-inset-bottom)); }
+  #ps-btn   { width:52px; height:52px; font-size:19px; bottom:calc(50px + env(safe-area-inset-bottom)); }
+  #dash-btn { width:46px; height:46px; font-size:17px; bottom:calc(108px + env(safe-area-inset-bottom));
+              right:calc(18px + env(safe-area-inset-right)); }
+  body.stick-right #dash-btn { right:auto; left:calc(18px + env(safe-area-inset-left)); }
   .chest-card { width:124px; min-height:100px; padding:9px 8px; }
   .chest-card h3 { font-size:11px; } .chest-card p { font-size:9px; }
   .mut-card { width:168px; padding:11px 10px; }
