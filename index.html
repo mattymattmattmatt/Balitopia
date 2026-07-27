@@ -7,7 +7,11 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <title>Balitopia: Guardians of the Broken Cages</title>
+<meta name="theme-color" content="#07131a">
+<meta name="description" content="Balitopia — break the cages, free the Guardians, and make the Hungry King go hungry. A mobile survivor-roguelite you can play in your browser.">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🏝</text></svg>">
+<link rel="apple-touch-icon" href="assets/img/icon-192.png">
+<link rel="manifest" href="manifest.json">
 <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
@@ -19,20 +23,35 @@
   <div id="hud-top-left">
     <div id="hp-wrap"><div id="hp-bar"></div><span id="hp-text"></span></div>
     <div id="xp-wrap"><div id="xp-bar"></div><span id="lvl-text">LV 1</span></div>
+    <div id="hud-meta">
+      <span id="soul-pips" title="Soul — spent on possession">✦✦✦</span>
+      <span id="relic-hud"></span>
+    </div>
   </div>
   <div id="hud-top-center">
     <div id="timer">0:00</div>
     <div id="boss-eta" class="hidden"></div>
-    <div id="boss-hp-wrap" class="hidden"><div id="boss-hp-bar"></div><span>KING GLOB</span></div>
+    <div id="boss-hp-wrap" class="hidden">
+      <div id="boss-hp-bar"></div><span>KING GLOB</span>
+      <i class="bhp-tick" style="left:50%"></i><i class="bhp-tick" style="left:20%"></i>
+    </div>
+    <div id="combo" class="hidden">
+      <b id="combo-n">×0</b><span id="combo-mul">1.00×</span>
+      <div id="combo-track"><div id="combo-bar"></div></div>
+    </div>
   </div>
   <div id="hud-top-right">
     <div id="kills">☠ 0</div>
     <div id="freed">⛓ 1/24</div>
+    <button id="formation-btn" aria-label="Squad formation">⭕</button>
     <button id="btn-roster" aria-label="Guardians roster / pause">☰</button>
     <button id="btn-mute" aria-label="Toggle sound">♪</button>
   </div>
   <div id="facecard-strip"></div>
+  <button id="dash-btn" aria-label="Dash"><span>⟫</span><i id="dash-fill"></i></button>
+  <button id="ps-btn" aria-label="Powershot"><span>⚡</span><i id="ps-fill"></i></button>
   <div id="banner" class="hidden"></div>
+  <div id="coach" class="hidden"></div>
 </div>
 
 <!-- ===== Title (VS key art + menu) ===== -->
@@ -49,6 +68,7 @@
     <button class="menu-btn" id="btn-menu-records">RECORDS</button>
     <div id="title-sub-btns">
       <button class="menu-btn small" id="btn-menu-howto">HOW TO PLAY</button>
+      <button class="menu-btn small" id="btn-menu-seed">🔗 SEED</button>
       <button class="menu-btn small" id="btn-menu-settings">⚙ SETTINGS</button>
     </div>
   </nav>
@@ -67,6 +87,25 @@
     <label class="set-row toggle"><span>Colorblind danger pips</span><input type="checkbox" id="set-colorblind"></label>
     <label class="set-row toggle"><span>Minimap</span><input type="checkbox" id="set-minimap"></label>
     <label class="set-row"><span>UI text size</span><input type="range" id="set-uiscale" min="90" max="130" step="5"><b id="set-uiscale-v"></b></label>
+    <div class="set-head">CONTROLS</div>
+    <label class="set-row"><span>Movement stick side</span>
+      <select id="set-stickside"><option value="left">Left</option><option value="right">Right</option></select></label>
+    <label class="set-row"><span>Stick type</span>
+      <select id="set-sticktype"><option value="float">Floating</option><option value="fixed">Fixed</option></select></label>
+    <label class="set-row"><span>Stick size</span><input type="range" id="set-sticksize" min="60" max="160" step="10"><b id="set-sticksize-v"></b></label>
+    <label class="set-row"><span>Dead zone</span><input type="range" id="set-deadzone" min="0" max="25" step="1"><b id="set-deadzone-v"></b></label>
+    <div class="set-head">PERFORMANCE &amp; COMFORT</div>
+    <label class="set-row"><span>Quality</span>
+      <select id="set-quality"><option value="auto">Auto</option><option value="high">High</option><option value="balanced">Balanced</option><option value="battery">Battery saver</option></select></label>
+    <label class="set-row"><span>Frame cap</span>
+      <select id="set-fps"><option value="60">60 fps</option><option value="45">45 fps</option><option value="30">30 fps (battery)</option></select></label>
+    <label class="set-row"><span>Screen shake</span><input type="range" id="set-shake" min="0" max="150" step="10"><b id="set-shake-v"></b></label>
+    <label class="set-row"><span>Screen flash</span><input type="range" id="set-flash" min="0" max="100" step="10"><b id="set-flash-v"></b></label>
+    <label class="set-row"><span>Damage numbers</span>
+      <select id="set-dmgnum"><option value="all">All</option><option value="big">Big only</option><option value="off">Off</option></select></label>
+    <label class="set-row"><span>Colour vision</span>
+      <select id="set-cvd"><option value="none">Standard</option><option value="deut">Deuteranopia</option><option value="prot">Protanopia</option><option value="trit">Tritanopia</option></select></label>
+    <label class="set-row toggle"><span>Assist mode (−35% damage taken)</span><input type="checkbox" id="set-assist"></label>
     <div class="set-danger">
       <button class="menu-btn2" id="btn-export-save">EXPORT SAVE</button>
       <button class="menu-btn2" id="btn-import-save">IMPORT SAVE</button>
@@ -111,9 +150,10 @@
 <!-- ===== Hero Select ===== -->
 <div id="screen-select" class="screen hidden">
   <button class="back-btn" id="btn-select-back">‹ BACK</button>
-  <h2 class="select-title">CHOOSE YOUR GUARDIAN</h2>
-  <p class="select-sub">The other 23 are caged across the island. Break them free — they fight beside you, and their bodies are yours to possess.</p>
+  <h2 class="select-title">CHOOSE YOUR GUARDIAN <span id="select-count"></span></h2>
+  <p class="select-sub">The rest are caged across the island. Break them free — they fight beside you, and their bodies are yours to possess.</p>
   <div id="hero-grid"></div>
+  <div id="select-goals"></div>
   <div id="hero-detail" class="hidden">
     <div id="hero-detail-portrait"></div>
     <div id="hero-detail-text">
@@ -138,7 +178,8 @@
 <!-- ===== Roster (in-game possession grid) ===== -->
 <div id="screen-roster" class="screen hidden">
   <h2 class="select-title">GUARDIANS</h2>
-  <p class="select-sub">Tap a freed guardian to possess them</p>
+  <p class="select-sub">Tap a freed Guardian to possess them — costs ✦ Soul, grants a 3s Soulburn</p>
+  <div id="roster-build"></div>
   <div id="roster-grid"></div>
   <div id="roster-btns">
     <button class="big-btn" id="btn-roster-close">RESUME</button>
@@ -151,9 +192,33 @@
 <div id="screen-levelup" class="screen hidden">
   <h2 class="select-title">LEVEL UP!</h2>
   <div id="upgrade-row"></div>
+  <div id="lu-build" class="build-strip"></div>
   <div id="levelup-ctrls">
     <button class="lu-ctrl" id="btn-lu-reroll">🎲 REROLL <b id="lu-reroll-n"></b></button>
     <button class="lu-ctrl" id="btn-lu-skip">⏭ SKIP <span class="lu-ctrl-sub">+15% HP</span></button>
+  </div>
+</div>
+
+<!-- ===== Chest reveal ===== -->
+<div id="screen-chest" class="screen hidden">
+  <h2 class="select-title">📦 CACHE OPENED — <span id="chest-count">1</span> BOONS</h2>
+  <div id="chest-row"></div>
+  <button class="big-btn hidden" id="btn-chest-close">TAKE THEM ALL</button>
+</div>
+
+<!-- ===== Endless mutator draft ===== -->
+<div id="screen-mutator" class="screen hidden">
+  <h2 class="select-title">CHOOSE YOUR CURSE</h2>
+  <p class="select-sub">Each round twists the island. The harder path pays more.</p>
+  <div id="mutator-row"></div>
+</div>
+
+<!-- ===== Generic in-game modal (replaces alert/confirm) ===== -->
+<div id="screen-modal" class="screen hidden">
+  <div id="modal-panel">
+    <h3 id="modal-title"></h3>
+    <p id="modal-body"></p>
+    <div id="modal-btns"></div>
   </div>
 </div>
 
@@ -167,6 +232,7 @@
     <div id="over-flavor"></div>
     <div id="over-score"></div>
     <div id="over-summary"></div>
+    <div id="over-goals"></div>
     <div class="over-sec-label">GUARDIAN PERFORMANCE</div>
     <div id="over-heroes"></div>
     <div id="over-btns">

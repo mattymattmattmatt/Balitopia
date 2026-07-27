@@ -1,2 +1,20 @@
-# Auto detect text files and perform LF normalization
+# Text files get LF normalisation...
 * text=auto
+
+# ...but binaries must NEVER be normalised. `text=auto` relies on a heuristic,
+# and a single mis-detected audio or image file would be silently corrupted on
+# checkout. Be explicit.
+*.mp3  binary
+*.wav  binary
+*.ogg  binary
+*.opus binary
+*.m4a  binary
+*.mp4  binary
+*.webm binary
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.webp binary
+*.gif  binary
+*.glb  binary
+*.ico  binary
