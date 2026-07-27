@@ -395,9 +395,11 @@ const clampW = v => Math.min(WORLD - 30, Math.max(30, v));
 
 function spawnWave(dt) {
   const t = G.time;
-  // Opens at 3.5/sec, not 1.4. The first 45 seconds used to be an empty field —
-  // the exact window that decides whether a player takes a second run.
-  const rate = Math.min(16, 3.5 + t * 0.028) * ((G.diff || DIFFICULTIES[0]).menace) * (G.mut.spawn || 1);
+  // Opens at 2.4/sec, not 1.4 — the first 45 seconds used to be an empty field,
+  // which is the exact window that decides whether a player takes a second run.
+  // (3.5 was over-corrected: soak testing had a passive player dying at 0:21 on
+  // the easiest difficulty.)
+  const rate = Math.min(16, 2.4 + t * 0.03) * ((G.diff || DIFFICULTIES[0]).menace) * (G.mut.spawn || 1);
   G.spawnAcc += rate * dt;
   const maxTier = Math.min(TIERS.length - 1, (t / 85) | 0);
   while (G.spawnAcc >= 1) {
@@ -506,6 +508,19 @@ function shakeAt(x, y, amt) {
   G.shake = Math.max(G.shake, amt);
   G.shakeAng = Math.atan2(y - player.y, x - player.x);
 }
+// Muzzle flash at the firing point, oriented along the shot. Every weapon used
+// to fire with no visual origin at all — projectiles simply appeared.
+function muzzleFlash(f, ang, color, scale) {
+  if (effects.length > 120) return;
+  effects.push({ type: 'muzzle', x: f.x + Math.cos(ang) * 12, y: f.y - 12 + Math.sin(ang) * 12,
+    ang, color, s: scale || 1, t: 0, dur: 0.11 });
+}
+// Directional spark burst where a projectile connects.
+function impactSpark(x, y, ang, color) {
+  if (effects.length > 130) return;
+  effects.push({ type: 'impact', x, y, ang, color, t: 0, dur: 0.18 });
+}
+
 function spawnChest(x, y, kind) {
   if (chests.length > 10) return;
   chests.push({ x, y, kind: kind || 'normal', t: 0, opened: false });
@@ -741,7 +756,7 @@ function killBoss(b) {
   // The 150s post-boss gap was dead time right after the run's biggest high.
   // Now it's structured: chest immediately, mutator choice, elite wave.
   spawnChest(b.x, b.y, 'gold');
-  schedule(2.0, () => { if (!G.over) showMutatorDraft(); });
+  schedule(2.0, () => { if (!G.over) queueOverlay(showMutatorDraft); });
   schedule(38, () => { if (!G.over) { spawnElite(); spawnElite(); } });
   Sound.playMusic('music/victory.mp3', { loop: false, vol: 0.6, fade: 0.5 });
   schedule(9, () => { if (!G.over && !G.boss) Sound.playMusic(`music/${G.region}.mp3`, { fade: 1.5 }); });
@@ -948,7 +963,7 @@ function fireWeapon(f, w, ws, isAlly, dt) {
       });
     }
     if (FX.ring) effects.push({ type: 'shock', x: f.x, y: f.y, r: 190 * areaMul, t: 0, dur: 0.45, color: w.color });
-    if (!isAlly) Sound.sfx.weapon('nova');
+    if (!isAlly) { Sound.sfx.weapon('nova'); effects.push({ type: 'shock', x: f.x, y: f.y, r: 90, t: 0, dur: 0.28, color: w.color }); }
     return;
   }
 
@@ -995,7 +1010,7 @@ function fireWeapon(f, w, ws, isAlly, dt) {
     if (FX.rebound) for (let j = chainHit.length - 1; j >= 0; j--)
       if (chainHit[j].alive) damageEnemy(chainHit[j], w.dmg * dmgMul * 0.45, { src, noCrit: 1, fromX: f.x, fromY: f.y });
     effects.push({ type: 'chain', pts, t: 0, dur: 0.2, color: w.color, rebound: FX.rebound });
-    if (!isAlly) Sound.sfx.weapon('chain');
+    if (!isAlly) { Sound.sfx.weapon('chain'); muzzleFlash(f, ang, w.color, 0.9); }
     return;
   }
 
@@ -1025,7 +1040,7 @@ function fireWeapon(f, w, ws, isAlly, dt) {
       if (along > 0 && along < L && Math.abs(px * dy - py * dx) < W2 + 26) damageCage(c, w.dmg * dmgMul);
     }
     effects.push({ type: 'beam', x: f.x, y: f.y, ang, len: L, wid: w.width * areaMul, t: 0, dur: 0.16, color: w.color });
-    if (!isAlly) Sound.sfx.weapon('beam');
+    if (!isAlly) { Sound.sfx.weapon('beam'); muzzleFlash(f, ang, w.color, 1.5); }
     return;
   }
 
@@ -1065,7 +1080,7 @@ function fireWeapon(f, w, ws, isAlly, dt) {
       }
     }
     effects.push({ type: 'slash', x: f.x, y: f.y, ang, r: R, arc: E.arc, t: 0, dur: 0.2, color: w.color });
-    if (!isAlly) Sound.sfx.weapon('slash');
+    if (!isAlly) { Sound.sfx.weapon('slash'); muzzleFlash(f, ang, w.color, 1.3); }
     return;
   }
 
@@ -1084,7 +1099,7 @@ function fireWeapon(f, w, ws, isAlly, dt) {
       Sound.sfx.nova();
     }
   }
-  if (!isAlly) Sound.sfx.weapon('shot');
+  if (!isAlly) { Sound.sfx.weapon('shot'); muzzleFlash(f, ang, w.color, 1 + (w.size || 6) / 14); }
 }
 
 function fireShotVolley(f, w, ang, eCount, dmgMul, areaMul, eSpeedMul, ePierce, eExplodeMul, FX, src, quiet) {
@@ -1194,6 +1209,7 @@ function updateProjs(dt) {
       damageEnemy(e, dm, { slow: p.slow, poison: p.poison, poisonT: p.poisonT, knock: p.knock,
         kx: p.vx, ky: p.vy, src: p.src, fromX: p.x - p.vx * 0.1, fromY: p.y - p.vy * 0.1 });
       if (p.fx && p.fx.bleed && e.alive) { e.burnT = Math.max(e.burnT || 0, 2.4); e.burnDps = (e.burnDps || 0) + dm * 0.12; e.burnSrc = p.src; }
+      if (p.size >= 7 || !e.alive) impactSpark(p.x, p.y, Math.atan2(p.vy, p.vx) + Math.PI, p.color);
       p.hitList.push(e.id);
       // Ricochet: a projectile that KILLS bounces to a new target
       if (G.mods.ricochet && before > 0 && !e.alive && p.rico !== 1) {
@@ -1964,7 +1980,7 @@ function openChest(c) {
   slowMo(0.35, 0.5); shakeAt(c.x, c.y, 7); buzz(HAPTIC.cage);
   Sound.sfx.chest();
   G.pendingChest = n;
-  showChest(n);
+  queueOverlay(() => showChest(n));
 }
 
 // ================================================================
@@ -2115,7 +2131,7 @@ function gainXP(v) {
     Sound.sfx.level();
     if (player) effects.push({ type: 'tierup', f: player, color: '#ffd54f', t: 0, dur: 0.8 });
   }
-  if (G.pendingLv > 0 && $('screen-levelup').classList.contains('hidden')) showLevelUp();
+  if (G.pendingLv > 0 && !overlayOpen()) queueOverlay(showLevelUp);
 }
 
 // ---------------- Main update ----------------
@@ -2704,11 +2720,22 @@ function render(dt) {
   // ---- relic visuals ----
   for (const r of relics) {
     if (r.def.w.type === 'sweep' && r.L) {
+      const col = r.def.w.color;
       for (let b = 0; b < r.beams; b++) {
         const a = r.ang + b * Math.PI;
-        ctx.strokeStyle = r.def.w.color; ctx.globalAlpha = 0.75; ctx.lineWidth = 7; ctx.lineCap = 'round';
-        ctx.beginPath(); ctx.moveTo(player.x, player.y); ctx.lineTo(player.x + Math.cos(a) * r.L, player.y + Math.sin(a) * r.L); ctx.stroke();
-        ctx.strokeStyle = '#fff'; ctx.globalAlpha = 0.6; ctx.lineWidth = 2.5; ctx.stroke();
+        const ex = player.x + Math.cos(a) * r.L, ey = player.y + Math.sin(a) * r.L;
+        ctx.lineCap = 'round';
+        ctx.strokeStyle = col; ctx.globalAlpha = 0.2; ctx.lineWidth = 26;
+        ctx.beginPath(); ctx.moveTo(player.x, player.y); ctx.lineTo(ex, ey); ctx.stroke();
+        ctx.globalAlpha = 0.8; ctx.lineWidth = 9;
+        ctx.beginPath(); ctx.moveTo(player.x, player.y); ctx.lineTo(ex, ey); ctx.stroke();
+        ctx.strokeStyle = '#fffde7'; ctx.globalAlpha = 0.95; ctx.lineWidth = 3;
+        ctx.beginPath(); ctx.moveTo(player.x, player.y); ctx.lineTo(ex, ey); ctx.stroke();
+        ctx.globalAlpha = 0.75;
+        const bs = 26 + Math.sin(G.time * 12 + b) * 4;
+        ctx.drawImage(Sprites.blast(col), ex - bs, ey - bs, bs * 2, bs * 2);
+        emitLight(ex, ey, 90, col, 0.45);
+        emitLight((player.x + ex) / 2, (player.y + ey) / 2, r.L * 0.5, col, 0.16);
       }
       ctx.globalAlpha = 1;
     }
@@ -2894,37 +2921,111 @@ function render(dt) {
     const p = 1 - fx.t / fx.dur;
     ctx.globalAlpha = p;
     if (fx.type === 'chain') {
-      ctx.strokeStyle = fx.color; ctx.lineWidth = 3;
+      // jagged bolt with forked branches and a flash at every node, rather than
+      // one thin polyline
+      const seg = (x0, y0, x1, y1, w, col) => {
+        ctx.strokeStyle = col; ctx.lineWidth = w; ctx.lineJoin = 'round';
+        ctx.beginPath(); ctx.moveTo(x0, y0);
+        const n = 4;
+        for (let s = 1; s < n; s++) {
+          const t = s / n;
+          ctx.lineTo(x0 + (x1 - x0) * t + (Math.random() - 0.5) * 16,
+                     y0 + (y1 - y0) * t + (Math.random() - 0.5) * 16);
+        }
+        ctx.lineTo(x1, y1); ctx.stroke();
+      };
+      for (let i = 1; i < fx.pts.length; i++) {
+        const a = fx.pts[i - 1], b2 = fx.pts[i];
+        const ay = i === 1 ? a.y - 14 : a.y;
+        seg(a.x, ay, b2.x, b2.y, 7 * p, `rgba(255,255,255,${p * 0.35})`);   // outer glow
+        seg(a.x, ay, b2.x, b2.y, 2.5 * p, fx.color);                         // core
+        if (Math.random() < 0.6) {                                           // fork
+          const fa = Math.atan2(b2.y - ay, b2.x - a.x) + (Math.random() - 0.5) * 1.6;
+          seg(b2.x, b2.y, b2.x + Math.cos(fa) * 26, b2.y + Math.sin(fa) * 26, 1.6 * p, fx.color);
+        }
+      }
+      for (let i = 1; i < fx.pts.length; i++) {
+        const n = 13 * p;
+        ctx.globalAlpha = p * 0.8;
+        ctx.drawImage(Sprites.get('glowW'), fx.pts[i].x - n, fx.pts[i].y - n, n * 2, n * 2);
+        ctx.globalAlpha = p;
+      }
+    } else if (fx.type === 'beam') {
+      // layered: wide soft glow, solid core, white centre, plus an impact burst
+      // at the far end so the beam terminates on something
+      const ex = fx.x + Math.cos(fx.ang) * fx.len, ey = fx.y - 12 + Math.sin(fx.ang) * fx.len;
+      ctx.lineCap = 'round';
+      ctx.globalAlpha = p * 0.28; ctx.strokeStyle = fx.color; ctx.lineWidth = fx.wid * 2.6;
+      ctx.beginPath(); ctx.moveTo(fx.x, fx.y - 12); ctx.lineTo(ex, ey); ctx.stroke();
+      ctx.globalAlpha = p; ctx.lineWidth = fx.wid * (0.6 + p * 0.4);
+      ctx.beginPath(); ctx.moveTo(fx.x, fx.y - 12); ctx.lineTo(ex, ey); ctx.stroke();
+      ctx.strokeStyle = '#fff'; ctx.lineWidth = Math.max(1.5, fx.wid * 0.3 * p);
+      ctx.beginPath(); ctx.moveTo(fx.x, fx.y - 12); ctx.lineTo(ex, ey); ctx.stroke();
+      const bs = 30 * p;
+      ctx.globalAlpha = p * 0.9;
+      ctx.drawImage(Sprites.blast(fx.color), ex - bs, ey - bs, bs * 2, bs * 2);
+    } else if (fx.type === 'slash') {
+      // A tapered swoosh with a white-hot leading edge, swept through the arc,
+      // instead of a uniform stroked arc segment.
+      const spr = Sprites.slash(fx.color);
+      const prog = fx.t / fx.dur;
+      const R = fx.r * (0.82 + 0.18 * prog);
+      const a = fx.ang - fx.arc / 2 + fx.arc * Math.min(1, prog * 1.35);
+      ctx.save();
+      ctx.translate(fx.x, fx.y - 10);
+      ctx.rotate(a);
+      ctx.globalAlpha = p;
+      const s = R / 82;
+      ctx.drawImage(spr, -96 * s, -96 * s, 192 * s, 192 * s);
+      ctx.restore();
+    } else if (fx.type === 'explo') {
+      // three layers: white-hot core, expanding shock ring, drifting smoke
+      const prog = fx.t / fx.dur;
+      const core = fx.r * (0.55 + prog * 0.75);
+      ctx.globalAlpha = p * p;
+      const bs = Sprites.blast(fx.color);
+      ctx.drawImage(bs, fx.x - core, fx.y - core, core * 2, core * 2);
+      const rr = fx.r * (0.6 + prog * 1.35);
+      ctx.globalAlpha = p * 0.85;
+      const rs = Sprites.ring(fx.color);
+      ctx.drawImage(rs, fx.x - rr, fx.y - rr, rr * 2, rr * 2);
+      if (QL.trails) {
+        ctx.globalAlpha = p * 0.35;
+        const sm = Sprites.smoke(), ss = fx.r * (0.7 + prog * 0.9);
+        ctx.drawImage(sm, fx.x - ss, fx.y - ss - prog * 14, ss * 2, ss * 2);
+      }
+    } else if (fx.type === 'shock') {
+      const prog = fx.t / fx.dur;
+      const pr = fx.r * prog;
+      ctx.globalAlpha = p * 0.9;
+      const rs = Sprites.ring(fx.color);
+      ctx.drawImage(rs, fx.x - pr, fx.y - pr, pr * 2, pr * 2);
+      ctx.globalAlpha = p * 0.55; ctx.strokeStyle = '#fff'; ctx.lineWidth = 2.5;
+      ctx.beginPath(); ctx.arc(fx.x, fx.y, pr, 0, 7); ctx.stroke();
+    } else if (fx.type === 'muzzle') {
+      const spr = Sprites.muzzle(fx.color);
+      ctx.save();
+      ctx.translate(fx.x, fx.y); ctx.rotate(fx.ang);
+      ctx.globalAlpha = p;
+      const s = fx.s || 1;
+      ctx.drawImage(spr, -6 * s, -24 * s, 64 * s, 48 * s);
+      ctx.restore();
+    } else if (fx.type === 'impact') {
+      // directional spark burst at the point of contact
+      ctx.globalAlpha = p;
+      ctx.strokeStyle = fx.color; ctx.lineWidth = 2.4 * p; ctx.lineCap = 'round';
+      const prog = fx.t / fx.dur;
       ctx.beginPath();
-      for (let i = 0; i < fx.pts.length; i++) {
-        const pt = fx.pts[i];
-        const jx = i === 0 ? 0 : (Math.random() - 0.5) * 10;
-        if (i === 0) ctx.moveTo(pt.x, pt.y - 14);
-        else ctx.lineTo(pt.x + jx, pt.y - 14 + jx);
+      for (let k = 0; k < 5; k++) {
+        const a = fx.ang + (k - 2) * 0.32;
+        const r0 = 5 + prog * 16, r1 = r0 + 9 * p;
+        ctx.moveTo(fx.x + Math.cos(a) * r0, fx.y + Math.sin(a) * r0);
+        ctx.lineTo(fx.x + Math.cos(a) * r1, fx.y + Math.sin(a) * r1);
       }
       ctx.stroke();
-    } else if (fx.type === 'beam') {
-      ctx.strokeStyle = fx.color; ctx.lineWidth = fx.wid * p; ctx.lineCap = 'round';
-      ctx.beginPath();
-      ctx.moveTo(fx.x, fx.y - 12);
-      ctx.lineTo(fx.x + Math.cos(fx.ang) * fx.len, fx.y - 12 + Math.sin(fx.ang) * fx.len);
-      ctx.stroke();
-      ctx.lineWidth = fx.wid * p * 0.4; ctx.strokeStyle = '#fff';
-      ctx.stroke();
-    } else if (fx.type === 'slash') {
-      ctx.strokeStyle = fx.color; ctx.lineWidth = 10 * p; ctx.lineCap = 'round';
-      ctx.beginPath();
-      ctx.arc(fx.x, fx.y, fx.r * (0.7 + 0.3 * (1 - p)), fx.ang - fx.arc / 2, fx.ang + fx.arc / 2);
-      ctx.stroke();
-    } else if (fx.type === 'explo') {
-      ctx.fillStyle = fx.color;
-      ctx.beginPath(); ctx.arc(fx.x, fx.y, fx.r * (1 - p * 0.5), 0, 7); ctx.fill();
-    } else if (fx.type === 'shock') {
-      const pr = fx.r * (fx.t / fx.dur);
-      ctx.strokeStyle = fx.color; ctx.lineWidth = 16 * p;
-      ctx.beginPath(); ctx.arc(fx.x, fx.y, pr, 0, 7); ctx.stroke();
-      ctx.globalAlpha = p * 0.3; ctx.fillStyle = '#fff';
-      ctx.beginPath(); ctx.arc(fx.x, fx.y, pr, 0, 7); ctx.fill();
+      ctx.globalAlpha = p * p;
+      const cs = 16 * (0.5 + prog);
+      ctx.drawImage(Sprites.get('glowW'), fx.x - cs, fx.y - cs, cs * 2, cs * 2);
     } else if (fx.type === 'cone') {
       ctx.fillStyle = fx.color; ctx.globalAlpha = p * 0.35;
       ctx.beginPath(); ctx.moveTo(fx.x, fx.y);
@@ -2948,15 +3049,27 @@ function render(dt) {
       ctx.drawImage(spr, -w2 / 2, -h + 4, w2, h);
       ctx.restore();
     } else if (fx.type === 'tierup') {
-      // level-up burst that follows the Guardian: two expanding rings + a rising halo
+      // ground rings + a rising column of motes + a halo — the previous version
+      // was two ellipse strokes for what is a Guardian's biggest milestone
       const fx2 = fx.f, prog = fx.t / fx.dur;
-      ctx.strokeStyle = fx.color; ctx.lineWidth = 3.5 * p; ctx.globalAlpha = p;
-      ctx.beginPath(); ctx.ellipse(fx2.x, fx2.y + 4, 16 + prog * 44, (16 + prog * 44) * 0.45, 0, 0, 7); ctx.stroke();
-      ctx.lineWidth = 2 * p;
-      ctx.beginPath(); ctx.ellipse(fx2.x, fx2.y + 4, 8 + prog * 30, (8 + prog * 30) * 0.45, 0, 0, 7); ctx.stroke();
-      ctx.globalAlpha = p * 0.9;
-      ctx.beginPath(); ctx.arc(fx2.x, fx2.y - 30 - prog * 36, 5 * p + 1, 0, 7);
-      ctx.fillStyle = fx.color; ctx.fill();
+      ctx.strokeStyle = fx.color; ctx.globalAlpha = p;
+      for (let k = 0; k < 2; k++) {
+        const rr = (10 + k * 10) + prog * (46 - k * 14);
+        ctx.lineWidth = (3.5 - k * 1.4) * p;
+        ctx.beginPath(); ctx.ellipse(fx2.x, fx2.y + 4, rr, rr * 0.45, 0, 0, 7); ctx.stroke();
+      }
+      ctx.fillStyle = fx.color;
+      for (let k = 0; k < 7; k++) {
+        const ph = (prog + k / 7) % 1;
+        const a = k * 1.9 + G.time * 2;
+        ctx.globalAlpha = p * (1 - ph) * 0.95;
+        ctx.beginPath();
+        ctx.arc(fx2.x + Math.cos(a) * (16 - ph * 8), fx2.y + 2 - ph * 64, 2.6 * (1 - ph) + 0.8, 0, 7);
+        ctx.fill();
+      }
+      const hs = 46 * p;
+      ctx.globalAlpha = p * 0.5;
+      ctx.drawImage(Sprites.light(fx.color), fx2.x - hs, fx2.y - 20 - hs, hs * 2, hs * 2);
     }
     ctx.globalAlpha = 1;
   }
@@ -2992,8 +3105,8 @@ function render(dt) {
   }
   ctx.globalAlpha = 1;
 
-  // ---- additive light pass (half-res offscreen so the fill cost is quartered) ----
-  if (QL.light) drawLightLayer(camX, camY, zs, onScreen);
+  // ---- lighting: ambient shade + coloured emitters ----
+  if (QL.light) { gatherLights(onScreen); drawLightLayer(camX, camY, zs, onScreen); }
 
   // ---- floaters ----
   ctx.textAlign = 'center';
@@ -3098,29 +3211,77 @@ function drawCoast(camX, camY, vw, vh) {
   ctx.restore();
 }
 
-// Additive light layer, composited from a half-resolution buffer. There was no
-// lighting in the game at all; this is the cheapest large step-change in look.
+// ================================================================
+// LIGHTING
+// The previous pass was a single additive white glow, which washes out against
+// a fully-lit world — additive light only reads if something darkens the scene
+// first. This is a two-part model: an ambient MULTIPLY tint that shades the
+// world by biome and by how far into the run you are, then coloured additive
+// emitters punched through it. The ambient darkening also doubles as a clock:
+// the island dims as King Glob approaches.
+// ================================================================
+const AMBIENT = {
+  land: { day: [255, 252, 236], dusk: [120, 116, 168], night: [58, 62, 112] },
+  sea:  { day: [238, 250, 255], dusk: [104, 130, 176], night: [40, 66, 108] },
+  sky:  { day: [255, 244, 252], dusk: [150, 122, 190], night: [72, 54, 122] },
+};
+// 0 = full day, 1 = full night. Ramps across the run and deepens for a boss.
+// Capped well short of 1: "colour = danger" is the game's primary information
+// channel, so the world may get moody but enemy tiers must stay readable.
+const AMBIENT_MAX = 0.62;
+function ambientPhase() {
+  if (prefs.dayNight === 0) return 0;
+  const t = Math.min(1, G.time / Math.max(60, G.nextBossAt));
+  const base = Math.pow(t, 1.3) * 0.52;
+  const bossDark = (G.boss && G.boss.alive) ? 0.18 : 0;
+  return Math.min(AMBIENT_MAX, base + bossDark) * ((prefs.dayNight == null ? 100 : prefs.dayNight) / 100);
+}
+function ambientColor() {
+  const A = AMBIENT[G.biome] || AMBIENT.land;
+  const p = ambientPhase();
+  const lerp = (a, b, k) => a + (b - a) * k;
+  let from = A.day, to = A.dusk, k = p / 0.55;
+  if (p > 0.55) { from = A.dusk; to = A.night; k = (p - 0.55) / 0.45; }
+  k = Math.max(0, Math.min(1, k));
+  return [lerp(from[0], to[0], k) | 0, lerp(from[1], to[1], k) | 0, lerp(from[2], to[2], k) | 0];
+}
+
+// Emitters are collected during the world pass, then drawn in one batch.
+let lights = [], lightN = 0;
+function emitLight(x, y, r, color, a) {
+  if (!QL.light || lightN >= 90) return;
+  const L = lights[lightN] || (lights[lightN] = {});
+  L.x = x; L.y = y; L.r = r; L.c = color; L.a = a;
+  lightN++;
+}
+
 function drawLightLayer(camX, camY, zs, onScreen) {
+  // --- 1. ambient shade (multiply): this is what makes lights read at all ---
+  const p = ambientPhase();
+  if (p > 0.02) {
+    const [r, g, b] = ambientColor();
+    ctx.save();
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.globalCompositeOperation = 'multiply';
+    ctx.fillStyle = `rgb(${r},${g},${b})`;
+    ctx.fillRect(0, 0, cw, ch);
+    ctx.restore();
+  }
+
+  // --- 2. coloured additive emitters, at half resolution ---
   const L = lightCtx, k = 0.5;
   L.setTransform(1, 0, 0, 1, 0, 0);
   L.clearRect(0, 0, lightCv.width, lightCv.height);
   L.setTransform(zs * k, 0, 0, zs * k, -camX * zs * k, -camY * zs * k);
   L.globalCompositeOperation = 'lighter';
-  const g = Sprites.get('glowW'), gg = Sprites.get('glowGold');
-  const put = (x, y, r, spr, a) => { L.globalAlpha = a; L.drawImage(spr, x - r, y - r, r * 2, r * 2); };
-  put(player.x, player.y - 18, 78, gg, 0.28);
-  // budgeted: the biggest/nearest projectiles only, so a 400-projectile screen
-  // doesn't turn the light pass into the frame's dominant cost
-  let lb = 46;
-  for (let i = 0; i < MAX_PROJ && lb > 0; i++) {
-    const p = projs[i];
-    if (!p.alive || p.size < 5 || !onScreen(p.x, p.y, 20)) continue;
-    put(p.x, p.y, p.size * 4.5, g, 0.2); lb--;
+  // brighter emitters when the world is darker, so the balance holds all run
+  const boost = 0.55 + p * 0.85;
+  for (let i = 0; i < lightN; i++) {
+    const e = lights[i];
+    const spr = Sprites.light(e.c);
+    L.globalAlpha = Math.min(1, e.a * boost);
+    L.drawImage(spr, e.x - e.r, e.y - e.r, e.r * 2, e.r * 2);
   }
-  for (const c of chests) put(c.x, c.y, 60, gg, 0.35);
-  for (const e of (G.visBuf || [])) if (e.elite) put(e.x, bodyY(e), 70, g, 0.22);
-  for (const t of totems) put(t.x, t.y - 26, 48, g, 0.24);
-  if (G.boss && G.boss.alive) put(G.boss.x, G.boss.y - 70, 150, g, 0.2);
   L.globalAlpha = 1;
   L.globalCompositeOperation = 'source-over';
   ctx.save();
@@ -3129,6 +3290,49 @@ function drawLightLayer(camX, camY, zs, onScreen) {
   ctx.drawImage(lightCv, 0, 0, cw, ch);
   ctx.globalCompositeOperation = 'source-over';
   ctx.restore();
+  lightN = 0;
+}
+
+// Collect the frame's emitters. Kept separate from drawing so the world pass
+// can add one-off lights (explosions, muzzle flashes) as it goes.
+function gatherLights(onScreen) {
+  if (!QL.light) return;
+  const hero = HEROES[player.heroIdx];
+  // wide soft fill first, so the area you're actually fighting in stays legible
+  emitLight(player.x, player.y - 18, 330, '#fff3d0', 0.13 + ambientPhase() * 0.16);
+  emitLight(player.x, player.y - 18, 96, hero.accent, 0.34);
+  if (G.burnT > 0) emitLight(player.x, player.y - 18, 150, '#ffd54f', 0.3);
+  // projectiles: budgeted to the largest, so a 400-projectile screen can't
+  // make the light pass the dominant frame cost
+  let lb = 34;
+  for (let i = 0; i < MAX_PROJ && lb > 0; i++) {
+    const pr = projs[i];
+    if (!pr.alive || pr.size < 5 || !onScreen(pr.x, pr.y, 20)) continue;
+    emitLight(pr.x, pr.y, pr.size * 5.5, pr.color, 0.24); lb--;
+  }
+  for (const c of chests) emitLight(c.x, c.y, 78, '#ffd54f', 0.45);
+  for (const t of totems) emitLight(t.x, t.y - 26, 70, '#4dd0e1', 0.3);
+  for (const s of spires) emitLight(s.x, s.y - 30, 56, '#80cbc4', 0.28);
+  for (const pa of patches) emitLight(pa.x, pa.y, pa.r * 1.7, pa.color, 0.3 * Math.min(1, pa.life));
+  for (const pl of pools) if (!pl.mine) emitLight(pl.x, pl.y, pl.r * 1.5, pl.color, 0.22);
+  for (const e of (G.visBuf || [])) {
+    if (e.elite) emitLight(e.x, bodyY(e), 92, e.affix.color, 0.3);
+    else if (e.burnT > 0) emitLight(e.x, bodyY(e), 44, '#ff7043', 0.22);
+    else if (e.slowT > 0) emitLight(e.x, bodyY(e), 40, '#b3e5fc', 0.16);
+  }
+  for (const al of allies) if (al.active) emitLight(al.x, al.y - 14, 52, HEROES[al.heroIdx].accent, 0.16);
+  for (const cg of cages) if (!cg.broken && onScreen(cg.x, cg.y, 90)) emitLight(cg.x, cg.y - 10, 62, '#ffd54f', 0.26);
+  if (G.boss && G.boss.alive)
+    emitLight(G.boss.x, G.boss.y - 70, 210, G.boss.kind === 'reef' ? '#ff4081' : '#9ccc65', 0.32 + (G.boss.frenzy ? 0.15 : 0));
+  // effects contribute their own transient light
+  for (const fx of effects) {
+    const life = 1 - fx.t / fx.dur;
+    if (fx.type === 'explo') emitLight(fx.x, fx.y, fx.r * 2.4 * (1.2 - life * 0.5), fx.color, life * 0.85);
+    else if (fx.type === 'shock') emitLight(fx.x, fx.y, fx.r * (fx.t / fx.dur) * 1.4, fx.color, life * 0.5);
+    else if (fx.type === 'bolt') emitLight(fx.x, fx.y, 190, fx.color, life * 0.8);
+    else if (fx.type === 'muzzle') emitLight(fx.x, fx.y, 70, fx.color, life * 0.6);
+    else if (fx.type === 'tierup') emitLight(fx.f.x, fx.f.y - 12, 130, fx.color, life * 0.6);
+  }
 }
 
 // A LOCAL radar, not a whole-world map. The old version squeezed 5200px into
@@ -3422,6 +3626,7 @@ function possess(idx) {
   // The 24 hero themes were only ever heard as select-screen previews — play a
   // short flourish of the Guardian's own theme over the battle music.
   Sound.duckFor(1.6);
+  Sound.heroFlourish(HEROES[idx].id);
   banner(`YOU ARE NOW ${HEROES[idx].name.toUpperCase()} — SOULBURN!`);
   buzz(HAPTIC.tick);
   if (heroState[idx] && heroState[idx].charge >= 1 && !G.powerHintShown) {
@@ -3593,8 +3798,8 @@ function rollLevelUpCards(n) {
 function closeLevelUp() {
   G.pendingLv--;
   $('screen-levelup').classList.add('hidden');
-  if (G.pendingLv > 0) showLevelUp();
-  else if (!G.over && $('screen-roster').classList.contains('hidden') && $('screen-chest').classList.contains('hidden')) G.running = true;
+  if (G.pendingLv > 0) { showLevelUp(); return; }
+  overlayClosed();
 }
 
 // THE core fix. Cards used to be dealt FACE-DOWN — the player picked one of
@@ -3624,10 +3829,12 @@ function showLevelUp() {
            </div>
          </div>`;
       // auto-reveal, staggered — the flip animation is kept, the hidden
-      // information is not
-      setTimeout(() => card.classList.add('flipped'), 90 + i * 110);
+      // information is not. A card can't be chosen until it has actually
+      // revealed, so a fast tap during the cascade can't blind-pick.
+      let ready = false;
+      setTimeout(() => { card.classList.add('flipped'); ready = true; }, 90 + i * 110);
       const choose = () => {
-        if (picked) return;
+        if (picked || !ready) return;
         picked = true;
         Sound.sfx.uiClick(); buzz(HAPTIC.level);
         card.classList.add('chosen');
@@ -3668,6 +3875,32 @@ function refreshBuildStrip() {
   el.innerHTML = items.length ? items.join('') : '<span class="bs-empty">no upgrades yet</span>';
 }
 
+// ================================================================
+// OVERLAY QUEUE
+// Level-up, chest reveal and the mutator draft can all be triggered while
+// another is already open — a chest from a boss kill, a level-up from its
+// gems, and the round's mutator draft can land in the same second. They used
+// to stack on top of each other. Now they queue and play in order.
+// ================================================================
+const OVERLAY_IDS = ['screen-levelup', 'screen-chest', 'screen-mutator'];
+let overlayQ = [];
+const overlayOpen = () => OVERLAY_IDS.some(id => !$(id).classList.contains('hidden'));
+function queueOverlay(fn) {
+  overlayQ.push(fn);
+  pumpOverlay();
+}
+function pumpOverlay() {
+  if (overlayOpen() || !overlayQ.length) return;
+  const fn = overlayQ.shift();
+  try { fn(); } catch (e) { console.error(e); pumpOverlay(); }
+}
+// Called by every overlay's close path: hand control to the next one, or back
+// to the game if the queue is empty.
+function overlayClosed() {
+  if (overlayQ.length) { pumpOverlay(); return; }
+  if (!G.over && $('screen-roster').classList.contains('hidden')) G.running = true;
+}
+
 // ---------------- Chest reveal ----------------
 // The slot-machine moment the reward curve never had.
 function showChest(n) {
@@ -3697,8 +3930,8 @@ function showChest(n) {
 function closeChest() {
   $('screen-chest').classList.add('hidden');
   Sound.sfx.uiClick();
-  if (!G.over && G.pendingLv > 0) showLevelUp();
-  else if (!G.over) G.running = true;
+  if (!G.over && G.pendingLv > 0) { showLevelUp(); return; }
+  overlayClosed();
 }
 
 // ---------------- Mutator draft (endless) ----------------
@@ -3707,7 +3940,7 @@ function showMutatorDraft() {
   const row = $('mutator-row');
   row.innerHTML = '';
   const pool = MUTATORS.filter(m => !G.mutTaken[m.id]);
-  if (pool.length < 2) { G.running = true; return; }
+  if (pool.length < 2) { overlayClosed(); return; }
   const a = pool.splice((Math.random() * pool.length) | 0, 1)[0];
   const b = pool.splice((Math.random() * pool.length) | 0, 1)[0];
   for (const m of [a, b]) {
@@ -3723,7 +3956,7 @@ function showMutatorDraft() {
       Sound.sfx.uiClick(); buzz(HAPTIC.tick);
       $('screen-mutator').classList.add('hidden');
       banner(`${m.icon} ${m.name.toUpperCase()} — ${m.desc}`);
-      if (!G.over) G.running = true;
+      overlayClosed();
     });
     row.appendChild(card);
   }
@@ -3932,7 +4165,7 @@ function newGame(heroIdx, diffIdx, daily) {
   G.cam.zoom = 1;
   heroState = HEROES.map(() => ({ dmg: 0, tier: 0, charge: 0, kills: 0, control: 0 }));
   heroMods = HEROES.map(freshHeroMod);
-  powerWaves = []; relics = []; timers = [];
+  powerWaves = []; relics = []; timers = []; overlayQ = [];
   chests = []; corpses = []; pools = []; ghosts = []; spires = []; totems = [];
   G.mods = {
     dmg: 1, rate: 1, spd: 1, hpBonus: 0, ally: 1, magnet: 1, regen: 0, area: 1,
@@ -4403,7 +4636,8 @@ function endGame() {
   G.over = true;
   // endless: a run always ends in death, but killing Glob at least once counts as a win
   const won = G.victory = G.bossKills > 0;
-  Sound.stopMusic();
+  Sound.stopMusic(0.6);
+  Sound.stopFlourish();
   Sound.playFile('assets/audio/sfx/captured.mp3', 0.9);
   setTimeout(() => {
     if (G.over) Sound.playMusic(won ? 'music/victory.mp3' : 'music/bgm_gameover.mp3', { loop: false, vol: 0.6 });
@@ -4413,7 +4647,8 @@ function endGame() {
   setTimeout(() => {
     G.running = false;
     G.pendingLv = 0;
-    $('screen-levelup').classList.add('hidden');   // clear any overlay caught mid-transition
+    overlayQ = [];
+    OVERLAY_IDS.forEach(id => $(id).classList.add('hidden'));   // clear overlays caught mid-transition
     $('screen-roster').classList.add('hidden');
     buildStatsScreen(rank);
     $('hud').classList.add('hidden');
@@ -4609,6 +4844,7 @@ function bindSettings() {
     $('set-fps').value = String(prefs.fpsCap);
     $('set-shake').value = prefs.shake; $('set-shake-v').textContent = prefs.shake + '%';
     $('set-flash').value = prefs.flash; $('set-flash-v').textContent = prefs.flash + '%';
+    $('set-daynight').value = prefs.dayNight; $('set-daynight-v').textContent = prefs.dayNight + '%';
     $('set-dmgnum').value = prefs.dmgnum;
     $('set-cvd').value = prefs.cvd;
     $('set-assist').checked = !!prefs.assist;
@@ -4624,6 +4860,7 @@ function bindSettings() {
   bindRange('set-deadzone', 'deadzone');
   bindRange('set-shake', 'shake');
   bindRange('set-flash', 'flash');
+  bindRange('set-daynight', 'dayNight');
   bindSel('set-stickside', 'stickSide');
   bindSel('set-sticktype', 'stickType');
   bindSel('set-quality', 'quality');
@@ -4850,7 +5087,7 @@ const confirmModal = (title, body, onYes, yesLabel) =>
 const PREF_DEFAULTS = {
   musicVol: 80, sfxVol: 100, haptics: 1, motion: 1, colorblind: 0, uiscale: 100, minimap: 1,
   stickSide: 'left', stickType: 'float', stickSize: 100, deadzone: 8,
-  quality: 'auto', fpsCap: 60, shake: 100, flash: 100, dmgnum: 'all', cvd: 'none', assist: 0,
+  quality: 'auto', fpsCap: 60, shake: 100, flash: 100, dmgnum: 'all', cvd: 'none', assist: 0, dayNight: 100,
 };
 let prefs = { ...PREF_DEFAULTS };
 function loadPrefs() {
@@ -5093,7 +5330,7 @@ function wire() {
     if (G.rerolls <= 0) return;
     G.rerolls--;
     Sound.sfx.uiSelect();
-    showLevelUp();   // re-roll a fresh trio of face-down cards
+    showLevelUp();   // deal a fresh hand
   });
   $('btn-lu-skip').addEventListener('click', () => {
     Sound.sfx.uiBack();
@@ -5194,7 +5431,7 @@ window.__balitopia = {
   addRelic, tryDash, tryPowershot, spawnElite, fireBeat, spawnChest, openChest,
   cycleFormation, showMutatorDraft, showChest, computeScore, effWeapon, bodyY,
   loadSave, saveGame, flushSave, nextGoals, runContext, checkUnlocks, isUnlocked,
-  applyQuality, coach, showModal, allyFalloff,
+  applyQuality, coach, showModal, allyFalloff, ambientPhase, ambientColor, heroState: () => heroState,
 };
 
 })();

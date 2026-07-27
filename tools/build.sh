@@ -42,11 +42,14 @@ copy_audio() {                       # copy_audio <subdir>
     fi
   done
   if [ "$n" = 0 ]; then
-    echo "  ! $d: no encoded audio found — falling back to the raw sources."
-    echo "    Run tools/encode_audio.sh first; the raw set is ~100 MB."
+    echo "  ! $d: no encoded audio — shipping raw sources (much larger)."
+    echo "    Run tools/encode_audio.sh first."
     cp assets/audio/"$d"/* "$OUT/assets/audio/$d/" 2>/dev/null || true
   fi
 }
+# The full hero songs are masters only: the game plays the 14s _preview cut for
+# both the select screen and the possession flourish, so a 2.3 MB track per
+# Guardian never needs to reach a player.
 for d in heroes enemies music sfx; do copy_audio "$d"; done
 cp assets/audio/sfx/manifest.json "$OUT/assets/audio/sfx/" 2>/dev/null || true
 

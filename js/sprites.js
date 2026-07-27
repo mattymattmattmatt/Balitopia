@@ -534,6 +534,7 @@ const Sprites = (() => {
       x.beginPath(); x.arc(c, c, size, 0, 7); x.stroke();
     });
   }
+  // ---------------- Lighting & VFX sprites ----------------
   // Soft radial used for the additive light layer + puff particles.
   function glow(color) {
     return mk(64, 64, (x, w) => {
@@ -542,6 +543,106 @@ const Sprites = (() => {
       x.fillStyle = g; x.fillRect(0, 0, w, w);
     });
   }
+  // A light with a hot core and a long soft falloff. A plain linear gradient
+  // reads as a flat disc; the extra inner stop is what makes it look like an
+  // emitter rather than a sticker.
+  function lightSprite(rgb) {
+    return mk(128, 128, (x, w) => {
+      const c = w / 2;
+      const g = x.createRadialGradient(c, c, 0, c, c, c);
+      g.addColorStop(0.00, `rgba(${rgb},1)`);
+      g.addColorStop(0.12, `rgba(${rgb},.85)`);
+      g.addColorStop(0.35, `rgba(${rgb},.34)`);
+      g.addColorStop(0.65, `rgba(${rgb},.09)`);
+      g.addColorStop(1.00, `rgba(${rgb},0)`);
+      x.fillStyle = g; x.fillRect(0, 0, w, w);
+    });
+  }
+  // Expanding shock ring: bright thin edge, soft inner wash.
+  function ringSprite(rgb) {
+    return mk(128, 128, (x, w) => {
+      const c = w / 2;
+      const g = x.createRadialGradient(c, c, 0, c, c, c);
+      g.addColorStop(0.00, `rgba(${rgb},0)`);
+      g.addColorStop(0.62, `rgba(${rgb},0)`);
+      g.addColorStop(0.80, `rgba(${rgb},.55)`);
+      g.addColorStop(0.92, `rgba(${rgb},1)`);
+      g.addColorStop(1.00, `rgba(${rgb},0)`);
+      x.fillStyle = g; x.fillRect(0, 0, w, w);
+    });
+  }
+  // Explosion core: white-hot centre grading out through the given colour.
+  function blastSprite(rgb) {
+    return mk(128, 128, (x, w) => {
+      const c = w / 2;
+      const g = x.createRadialGradient(c, c, 0, c, c, c);
+      g.addColorStop(0.00, 'rgba(255,255,255,1)');
+      g.addColorStop(0.18, 'rgba(255,248,220,.95)');
+      g.addColorStop(0.42, `rgba(${rgb},.8)`);
+      g.addColorStop(0.75, `rgba(${rgb},.24)`);
+      g.addColorStop(1.00, `rgba(${rgb},0)`);
+      x.fillStyle = g; x.fillRect(0, 0, w, w);
+    });
+  }
+  // Soft smoke puff with a little internal structure so it isn't a flat blob.
+  function smokeSprite() {
+    return mk(64, 64, (x, w) => {
+      const c = w / 2;
+      let seed = 31;
+      const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+      for (let i = 0; i < 7; i++) {
+        const px = c + (rnd() - 0.5) * 22, py = c + (rnd() - 0.5) * 22, r = 10 + rnd() * 14;
+        const g = x.createRadialGradient(px, py, 0, px, py, r);
+        g.addColorStop(0, 'rgba(255,255,255,.30)');
+        g.addColorStop(1, 'rgba(255,255,255,0)');
+        x.fillStyle = g;
+        x.beginPath(); x.arc(px, py, r, 0, 7); x.fill();
+      }
+    });
+  }
+  // Tapered crescent for slashes: bright leading edge, fading tail.
+  function slashSprite(rgb) {
+    const S = 192;
+    return mk(S, S, (x, w) => {
+      const c = w / 2;
+      x.translate(c, c);
+      for (let i = 0; i < 22; i++) {
+        const t = i / 21;                     // 0 = tail, 1 = leading edge
+        const a0 = -1.15 + t * 2.3;
+        x.strokeStyle = `rgba(${rgb},${0.10 + t * 0.9})`;
+        x.lineWidth = 3 + t * 16;
+        x.lineCap = 'round';
+        x.beginPath(); x.arc(0, 0, c - 14, a0, a0 + 0.12); x.stroke();
+      }
+      // white-hot leading tip
+      x.strokeStyle = 'rgba(255,255,255,.9)'; x.lineWidth = 5;
+      x.beginPath(); x.arc(0, 0, c - 14, 1.02, 1.15); x.stroke();
+    });
+  }
+  // Muzzle flash: a short cone of light at the firing point.
+  function muzzleSprite(rgb) {
+    return mk(64, 48, (x, w, h) => {
+      const cy = h / 2;
+      const g = x.createLinearGradient(0, 0, w, 0);
+      g.addColorStop(0, `rgba(${rgb},.95)`);
+      g.addColorStop(0.45, `rgba(${rgb},.4)`);
+      g.addColorStop(1, `rgba(${rgb},0)`);
+      x.fillStyle = g;
+      x.beginPath();
+      x.moveTo(0, cy - 9); x.quadraticCurveTo(w * 0.6, cy - 13, w, cy);
+      x.quadraticCurveTo(w * 0.6, cy + 13, 0, cy + 9);
+      x.closePath(); x.fill();
+      x.fillStyle = 'rgba(255,255,255,.85)';
+      x.beginPath(); x.ellipse(5, cy, 6, 7, 0, 0, 7); x.fill();
+    });
+  }
+  const rgbOf = hex => {
+    if (!hex || hex[0] !== '#') return '255,255,255';
+    let h = hex.slice(1);
+    if (h.length === 3) h = h[0] + h[0] + h[1] + h[1] + h[2] + h[2];
+    const n = parseInt(h, 16);
+    return `${(n >> 16) & 255},${(n >> 8) & 255},${n & 255}`;
+  };
   function chestSprite(open) {
     return mk(44, 40, (x, w, h) => {
       x.fillStyle = 'rgba(0,0,0,.25)';
@@ -622,6 +723,15 @@ const Sprites = (() => {
     const b = Math.min(44, Math.max(12, Math.round(r / 4) * 4));
     return get(kind + b, () => (kind === 'poison' ? statusPoison : kind === 'frost' ? statusFrost : statusBurn)(b));
   }
+  // Colour-keyed VFX sprites, made on demand and cached. The set stays small
+  // because colours come from a fixed palette (hero accents + weapon colours).
+  const light = c => get('L_' + c, () => lightSprite(rgbOf(c)));
+  const ring  = c => get('R_' + c, () => ringSprite(rgbOf(c)));
+  const blast = c => get('B_' + c, () => blastSprite(rgbOf(c)));
+  const slash = c => get('S_' + c, () => slashSprite(rgbOf(c)));
+  const muzzle = c => get('M_' + c, () => muzzleSprite(rgbOf(c)));
+  const smoke = () => get('smoke', smokeSprite);
 
-  return { init, get, portrait, shade, proj, statusFx, groundTile };
+  return { init, get, portrait, shade, proj, statusFx, groundTile,
+    light, ring, blast, slash, muzzle, smoke, rgbOf };
 })();

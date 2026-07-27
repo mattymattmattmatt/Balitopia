@@ -8,6 +8,43 @@ const Sound = (() => {
   let muted = false, musicTimer = null, step = 0;
   let musicVol = 0.8, sfxVol = 1.0, musicBase = 0.55;   // 0..1 user volumes
 
+  // ---------------- Encoded-audio resolution ----------------
+  // The shipped library is Opus (+ AAC for older Safari); the .mp3/.wav files
+  // are masters that tools/build.sh excludes. Everything in the game still
+  // *asks* for the logical .mp3/.wav name — this rewrites the extension once,
+  // per session, to whatever the browser can actually play. If neither encoded
+  // form exists (running straight from the repo) the original path is used, so
+  // a source checkout keeps working with no changes.
+  //   100.8 MB of sources -> 17.9 MB of Opus. Hero audio alone: 67.9 -> 4.5 MB.
+  const AUDIO_EXT = (() => {
+    try {
+      const a = document.createElement('audio');
+      if (a.canPlayType('audio/ogg; codecs="opus"').replace('no', '')) return '.opus';
+      if (a.canPlayType('audio/mp4; codecs="mp4a.40.2"').replace('no', '')) return '.m4a';
+    } catch (e) {}
+    return null;
+  })();
+  let ENCODED = null;                    // null = unknown yet, true/false once probed
+  function probeEncoded() {
+    if (!AUDIO_EXT) { ENCODED = false; return; }
+    // one HEAD against a file that always exists tells us whether this deploy
+    // carries the encoded set
+    fetch('assets/audio/sfx/ui_click' + AUDIO_EXT, { method: 'HEAD' })
+      .then(r => { ENCODED = r.ok; })
+      .catch(() => { ENCODED = false; });
+  }
+  // Hero themes ship ONLY as a 14s hook — it serves both the select-screen
+  // preview and the possession flourish, which is every use the game has.
+  function src(path) {
+    if (ENCODED === false || !AUDIO_EXT) return path;
+    const m = path.match(/^(.*)\.(mp3|wav)$/);
+    if (!m) return path;
+    let base = m[1];
+    if (/\/heroes\/[^/]+$/.test(base) && !/_entrance$/.test(base) && !/_preview$/.test(base))
+      base += '_preview';
+    return base + AUDIO_EXT;
+  }
+
   function ensure() {
     if (ctx) { if (ctx.state === 'suspended') ctx.resume(); return true; }
     try {
@@ -72,7 +109,7 @@ const Sound = (() => {
     let a = pool.find(x => x.paused || x.ended);
     if (!a) {
       if (pool.length >= 5) a = pool[0];
-      else { a = new Audio(`assets/audio/sfx/${name}.mp3`); pool.push(a); }
+      else { a = new Audio(src(`assets/audio/sfx/${name}.mp3`)); pool.push(a); }
     }
     a.volume = vol == null ? 0.8 : vol;
     try { a.currentTime = 0; } catch (e) {}
@@ -148,6 +185,7 @@ const Sound = (() => {
     combo(n)     { if (ok('combo', 60)) blip(500 + Math.min(900, n * 22), 0.05, 'sine', 0.06, 90); },
   };
   probeSfx();
+  probeEncoded();
 
   // resume the WebAudio context after a phone lock / tab switch — otherwise
   // synth SFX silently die for the rest of the run
@@ -227,7 +265,7 @@ const Sound = (() => {
     const old = musicEl;
     musicPath = path;
     musicBase = vol;
-    const el = new Audio('assets/audio/' + path);
+    const el = new Audio(src('assets/audio/' + path));
     el.loop = loop;
     el.volume = 0;
     el.muted = muted;
@@ -266,13 +304,13 @@ const Sound = (() => {
     musicPath = null;
   }
   // Pause/resume for backgrounding — the loop used to keep playing during a call.
-  function pauseAll() { if (musicEl) musicEl.pause(); if (previewEl) previewEl.pause(); }
+  function pauseAll() { if (musicEl) musicEl.pause(); stopPreview(); stopFlourish(); }
   function resumeAll() { if (musicEl) musicEl.play().catch(() => {}); }
 
   function playFile(path, vol) {
     if (muted || sfxVol <= 0) return;
     let a = fileCache[path];
-    if (!a) { a = new Audio(path); fileCache[path] = a; }
+    if (!a) { a = new Audio(src(path)); fileCache[path] = a; }
     a.volume = (vol === undefined ? 0.9 : vol) * sfxVol;
     try { a.currentTime = 0; } catch (e) {}
     a.play().catch(() => {});
@@ -285,25 +323,20 @@ const Sound = (() => {
   // (c) stop after a 12s hook so a long track never downloads in full.
   // See tools/encode_audio.sh for the pipeline that generates the small files.
   let previewStop = null;
-  const previewHas = {};
   function preview(path) {
     stopPreview();
-    // try the cheap preview cut first; fall back to the full track
-    const short = path.replace(/\.(mp3|ogg|opus|m4a)$/, '_preview.$1');
-    const src = previewHas[path] === false ? path : short;
+    // src() already resolves hero themes to their 14s _preview cut, so the
+    // whole preview is ~160 KB instead of a 2.3 MB song. On a source checkout
+    // with no encoded set it falls back to the full track, and the hard stop
+    // below keeps even that from streaming in full.
     previewEl = new Audio();
     previewEl.preload = 'auto';
     previewEl.volume = 0.6 * musicVol;
     previewEl.muted = muted;
-    previewEl.onerror = () => {
-      if (previewHas[path] !== false && previewEl && previewEl.src.includes('_preview')) {
-        previewHas[path] = false;                 // no cut on disk — use the full track once
-        preview(path);
-      }
-    };
-    previewEl.src = src;
+    previewEl.loop = true;
+    previewEl.src = src(path);
     previewEl.play().catch(() => {});
-    previewStop = setTimeout(stopPreview, 12000);  // never stream more than the hook
+    previewStop = setTimeout(stopPreview, 16000);
   }
   function stopPreview() {
     clearTimeout(previewStop); previewStop = null;
@@ -312,6 +345,37 @@ const Sound = (() => {
       // abort the in-flight fetch — pause() alone keeps downloading
       try { previewEl.removeAttribute('src'); previewEl.load(); } catch (e) {}
       previewEl = null;
+    }
+  }
+
+  // A 5s flourish of the possessed Guardian's own theme over the battle music.
+  // The game ships 24 hero themes and used to play them for ~8 seconds per
+  // session, on the select screen only. Same file as the preview, so it's
+  // already cached by the time it matters.
+  let flourishEl = null, flourishStop = null;
+  function heroFlourish(id) {
+    stopFlourish();
+    if (muted || musicVol <= 0) return;
+    flourishEl = new Audio(src(`assets/audio/heroes/${id}.mp3`));
+    flourishEl.volume = 0;
+    flourishEl.play().then(() => {
+      // quick fade in, hold, fade out — never a hard cut over the battle track
+      const t0 = performance.now(), peak = 0.5 * musicVol;
+      const iv = setInterval(() => {
+        if (!flourishEl) return clearInterval(iv);
+        const t = (performance.now() - t0) / 1000;
+        flourishEl.volume = Math.max(0, Math.min(peak, t < 0.4 ? peak * (t / 0.4) : t > 4 ? peak * (1 - (t - 4)) : peak));
+        if (t > 5) { clearInterval(iv); stopFlourish(); }
+      }, 60);
+    }).catch(() => {});
+    flourishStop = setTimeout(stopFlourish, 5600);
+  }
+  function stopFlourish() {
+    clearTimeout(flourishStop); flourishStop = null;
+    if (flourishEl) {
+      flourishEl.pause();
+      try { flourishEl.removeAttribute('src'); flourishEl.load(); } catch (e) {}
+      flourishEl = null;
     }
   }
 
@@ -334,6 +398,6 @@ const Sound = (() => {
   }
 
   return { ensure, sfx: S, startMusic, stopMusic, playMusic, playFile, preview, stopPreview,
-    toggleMute, setMuted, setMusicVol, setSfxVol, duckFor, pauseAll, resumeAll,
+    toggleMute, setMuted, setMusicVol, setSfxVol, duckFor, pauseAll, resumeAll, heroFlourish, stopFlourish,
     get muted() { return muted; }, get musicVol() { return musicVol; }, get sfxVol() { return sfxVol; } };
 })();

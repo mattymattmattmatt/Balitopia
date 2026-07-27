@@ -181,3 +181,92 @@ Seamless ground tiling removed the visible 256px grid; the large-scale variation
 a single 768px tile rather than drawn as a second full-screen layer. Status effects are
 pre-baked sprites, shadows are bucketed for 1:1 blits, enemy draws are quantised and batched,
 and decor is spatially bucketed so density could go 150 → 900 props.
+
+---
+
+# Audio, lighting & VFX pass
+
+## Audio delivery — 100.8 MB → 17.9 MB
+
+`tools/encode_audio.sh` now runs for real. The source library had two
+pathological shapes:
+
+| | Before | After | Cut |
+|---|---|---|---|
+| Hero themes (×24) | full 3:50 songs @ 182 kb/s stereo, 2.3 MB each | 14s hook @ 96k mono, ~170 KB | **93%** |
+| Entrance stingers (×24) | 3 seconds of **uncompressed PCM** @ 1536 kb/s, 550 KB each | 64k mono Opus, ~22 KB | **96%** |
+| Hero audio total | 67.9 MB | 4.5 MB | 93% |
+| **Whole library** | **100.8 MB** | **17.9 MB** (Opus) | **82%** |
+
+The full hero songs are never shipped — the 14s hook serves both the select
+screen preview *and* the new possession flourish, which is every use the game
+has. Both Opus and AAC are produced; `audio.js` feature-detects with
+`canPlayType` so a browser fetches exactly one, and falls back to the raw
+sources automatically on a plain source checkout.
+
+**A complete first session now transfers 5.1 MB** (previously ~18.6 MB, and
+that was with only four hero previews). Repeat visits are near-zero via the
+service worker. `preview()` also *aborts* in-flight fetches instead of pausing
+them — `pause()` alone keeps downloading, which was most of the original waste.
+
+Newly audible: the 24 hero themes now play a 5-second flourish over the battle
+music when you possess that Guardian. They were previously heard for about
+eight seconds per session, on the select screen only.
+
+## Lighting
+
+There was no lighting at all; the first pass added a single additive white
+glow, which washes out because additive light only reads if something darkens
+the scene first. It is now a two-part model:
+
+1. **Ambient shade** — a `multiply` tint keyed to biome (jungle / sea / sky each
+   have day, dusk and night palettes) that also functions as a *clock*: the
+   island dims as King Glob's arrival approaches, and deepens further while a
+   boss is alive.
+2. **Coloured emitters** — up to 90 per frame, composited from a half-resolution
+   buffer, each tinted to its source: hero accent, weapon colour, elite affix,
+   fire orange, frost blue, cage gold, boss green/magenta. Emitter brightness
+   scales with the ambient darkness so the balance holds all run.
+
+Ambient darkness is deliberately capped at 0.62, not 1.0 — "colour = danger" is
+the game's primary information channel, so the world may get moody but enemy
+tiers must stay readable. A wide soft fill light around the player guarantees
+the area you're actually fighting in stays legible, and **Dynamic lighting** is
+a 0–100% slider in Settings.
+
+## VFX
+
+| Effect | Before | After |
+|---|---|---|
+| Explosion | one filled circle | white-hot core + expanding shock ring + drifting smoke |
+| Slash | uniform stroked arc | tapered swoosh sprite with a white-hot leading edge, swept through the arc |
+| Beam | two stroked lines | soft outer glow + core + white centre + impact burst at the far end |
+| Chain lightning | one thin polyline | jagged multi-segment bolt with random forks and a flash at every node |
+| Shockwave | stroked circle | soft ring sprite with a bright leading edge |
+| Tier-up | two ellipse strokes | ground rings + a rising column of motes + a halo |
+| Muzzle | *nothing* — projectiles simply appeared | per-archetype flash cone at the firing point |
+| Impact | *nothing* | directional spark burst oriented to the hit normal |
+
+All new VFX sprites are colour-keyed and cached (the palette is bounded by hero
+accents and weapon colours), and the impact/muzzle emitters are budgeted so a
+300-enemy screen can't flood the effect list.
+
+## Also fixed in this pass
+
+- **Overlay stacking.** Level-up, chest reveal and mutator draft could all open
+  on top of one another — a boss kill drops a chest, its gems trigger a
+  level-up, and the round's mutator draft lands in the same second. They now
+  queue and play in order.
+- **RESUME scrolled off-screen.** The roster grid grows with every Guardian you
+  free; with a full roster on a 390px-tall landscape screen the button flowed
+  below the fold. The grid now scrolls inside the screen with the controls
+  pinned.
+- **Blind-picking during the reveal cascade.** A fast tap could select a
+  level-up card before it had flipped. Cards are now unselectable until revealed.
+- **Opening spawn rate re-tuned** from 3.5/sec back to 2.4/sec. Soak testing
+  showed a *passive* player dying at 0:21 on the easiest difficulty; a kiting
+  player now takes almost no damage early and dies around 2:20, which is the
+  right shape — difficulty that rewards skill rather than punishing arrival.
+
+Performance held throughout: 60 fps early, 57 at 150 enemies, 53 at 300, 53
+with 300 + 23 allies + relics, and 60 on the battery preset.
