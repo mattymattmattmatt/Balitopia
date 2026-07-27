@@ -303,31 +303,76 @@ const Sprites = (() => {
     sea:  { base: '#1f6b70', patch: '12,60,66',  sand: '224,204,150', tuft: '90,210,210',  flowers: ['#ffe0b2', '#b2ebf2', '#fff59d'] },
     sky:  { base: '#5a5a8f', patch: '40,40,80',   sand: '210,210,255', tuft: '190,180,255', flowers: ['#ffffff', '#e1bee7', '#b3e5fc'] },
   };
-  function groundTile(region) {
+  // SEAMLESS tiling: every feature is drawn nine times at (±w, ±h) offsets, so
+  // anything crossing an edge reappears on the opposite side. Without this the
+  // 256px grid is plainly visible across the whole playfield.
+  function groundTile(region, size, detail) {
     const p = BIOMES[region] || BIOMES.land;
-    return mk(256, 256, (x, w, h) => {
-      x.fillStyle = p.base; x.fillRect(0, 0, w, h);
-      let seed = 7;
-      const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
-      for (let i = 0; i < 26; i++) {
-        x.fillStyle = `rgba(${p.patch},${0.12 + rnd() * 0.12})`;
-        x.beginPath(); x.ellipse(rnd() * w, rnd() * h, 14 + rnd() * 30, 10 + rnd() * 22, rnd() * 3, 0, 7); x.fill();
-      }
-      for (let i = 0; i < 6; i++) {
-        x.fillStyle = `rgba(${p.sand},.10)`;
-        x.beginPath(); x.ellipse(rnd() * w, rnd() * h, 18 + rnd() * 26, 12 + rnd() * 18, rnd() * 3, 0, 7); x.fill();
-      }
-      x.strokeStyle = `rgba(${p.tuft},.5)`; x.lineWidth = 1.6; x.lineCap = 'round';
-      for (let i = 0; i < 46; i++) {
-        const gx = rnd() * w, gy = rnd() * h;
-        for (let b = -1; b <= 1; b++) {
-          x.beginPath(); x.moveTo(gx, gy); x.lineTo(gx + b * 3, gy - 5 - rnd() * 3); x.stroke();
+    const S = size || 256;
+    return mk(S, S, (x, w, h) => {
+      // wrap(fn) runs fn once per 3x3 offset so shapes tile without seams
+      const wrap = fn => {
+        for (let ox = -1; ox <= 1; ox++) for (let oy = -1; oy <= 1; oy++) {
+          x.save(); x.translate(ox * w, oy * h); fn(); x.restore();
         }
-      }
-      for (let i = 0; i < 10; i++) {
-        x.fillStyle = p.flowers[i % 3];
-        x.beginPath(); x.arc(rnd() * w, rnd() * h, 2, 0, 7); x.fill();
-      }
+      };
+      x.fillStyle = p.base; x.fillRect(0, 0, w, h);
+      let seed = detail || 7;
+      const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+      const blobs = [], sands = [], tufts = [], flowers = [];
+      for (let i = 0; i < 26; i++) blobs.push([rnd() * w, rnd() * h, 14 + rnd() * 30, 10 + rnd() * 22, rnd() * 3, 0.12 + rnd() * 0.12]);
+      for (let i = 0; i < 6; i++) sands.push([rnd() * w, rnd() * h, 18 + rnd() * 26, 12 + rnd() * 18, rnd() * 3]);
+      for (let i = 0; i < 46; i++) tufts.push([rnd() * w, rnd() * h, rnd(), rnd(), rnd()]);
+      for (let i = 0; i < 10; i++) flowers.push([rnd() * w, rnd() * h, i % 3]);
+
+      wrap(() => { for (const [bx, by, rx, ry, rot, a] of blobs) {
+        x.fillStyle = `rgba(${p.patch},${a})`;
+        x.beginPath(); x.ellipse(bx, by, rx, ry, rot, 0, 7); x.fill();
+      } });
+      wrap(() => { for (const [bx, by, rx, ry, rot] of sands) {
+        x.fillStyle = `rgba(${p.sand},.10)`;
+        x.beginPath(); x.ellipse(bx, by, rx, ry, rot, 0, 7); x.fill();
+      } });
+      x.strokeStyle = `rgba(${p.tuft},.5)`; x.lineWidth = 1.6; x.lineCap = 'round';
+      wrap(() => { for (const [gx, gy, r1, r2, r3] of tufts) {
+        const rs = [r1, r2, r3];
+        for (let b = -1; b <= 1; b++) {
+          x.beginPath(); x.moveTo(gx, gy); x.lineTo(gx + b * 3, gy - 5 - rs[b + 1] * 3); x.stroke();
+        }
+      } });
+      wrap(() => { for (const [fx2, fy, fi] of flowers) {
+        x.fillStyle = p.flowers[fi];
+        x.beginPath(); x.arc(fx2, fy, 2, 0, 7); x.fill();
+      } });
+    });
+  }
+
+  // The large-scale variation is BAKED INTO a single 768px tile rather than
+  // drawn as a second full-screen layer. Two overlapping ground passes doubled
+  // the frame's fill cost, which profiling showed was the dominant expense.
+  // One tile, one pass, same "no visible grid" result.
+  function groundBaked(region) {
+    const p = BIOMES[region] || BIOMES.land;
+    const S = 768;
+    return mk(S, S, (x, w, h) => {
+      // 3x3 of the 256px seamless base fills the 768 tile exactly
+      const base = groundTile(region);
+      for (let i = 0; i < 3; i++) for (let j = 0; j < 3; j++) x.drawImage(base, i * 256, j * 256);
+      // large-scale blobs on top, wrapped so the 768 tile is itself seamless
+      const wrap = fn => { for (let ox = -1; ox <= 1; ox++) for (let oy = -1; oy <= 1; oy++) { x.save(); x.translate(ox * w, oy * h); fn(); x.restore(); } };
+      let seed = 991;
+      const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+      const shapes = [];
+      for (let i = 0; i < 16; i++) shapes.push([rnd() * w, rnd() * h, 90 + rnd() * 200, 70 + rnd() * 160, rnd() * 3, 0.06 + rnd() * 0.07]);
+      wrap(() => { for (const [bx, by, rx, ry, rot, a] of shapes) {
+        x.fillStyle = `rgba(${p.patch},${a})`;
+        x.beginPath(); x.ellipse(bx, by, rx, ry, rot, 0, 7); x.fill();
+      } });
+      // a few bright sand sweeps for large-scale interest
+      wrap(() => { for (let i = 0; i < 5; i++) {
+        x.fillStyle = `rgba(${p.sand},.07)`;
+        x.beginPath(); x.ellipse(rnd() * w, rnd() * h, 120 + rnd() * 160, 60 + rnd() * 90, rnd() * 3, 0, 7); x.fill();
+      } });
     });
   }
   function palm() {
@@ -377,6 +422,143 @@ const Sprites = (() => {
     });
   }
 
+  // ---------------- Pre-baked status overlays ----------------
+  // These used to be 6-9 beginPath/fill pairs per affected enemy per frame.
+  // Baking them once at load turns each into a single drawImage.
+  function statusPoison(r) {
+    const S = Math.ceil(r * 2.6);
+    return mk(S, S, (x, w, h) => {
+      const c = w / 2;
+      const g = x.createRadialGradient(c, c, r * 0.15, c, c, r * 0.95);
+      g.addColorStop(0, 'rgba(139,195,74,.55)'); g.addColorStop(1, 'rgba(139,195,74,0)');
+      x.fillStyle = g; x.beginPath(); x.arc(c, c, r * 0.95, 0, 7); x.fill();
+      x.fillStyle = 'rgba(197,225,165,.8)';
+      for (let k = 0; k < 4; k++) {
+        const a = k / 4 * 6.283 + 0.6;
+        x.beginPath(); x.arc(c + Math.cos(a) * r * 0.5, c + Math.sin(a) * r * 0.5, 2.2, 0, 7); x.fill();
+      }
+    });
+  }
+  function statusFrost(r) {
+    const S = Math.ceil(r * 2.6);
+    return mk(S, S, (x, w, h) => {
+      const c = w / 2;
+      x.globalAlpha = 0.3; x.fillStyle = '#b3e5fc';
+      x.beginPath(); x.arc(c, c, r * 0.92, 0, 7); x.fill();
+      x.globalAlpha = 0.9; x.strokeStyle = '#e1f5fe'; x.lineWidth = 1.6;
+      for (let k = 0; k < 5; k++) {
+        const a = k / 5 * 6.283;
+        const ix = c + Math.cos(a) * r * 0.8, iy = c + Math.sin(a) * r * 0.8;
+        x.beginPath(); x.moveTo(ix, iy); x.lineTo(ix + Math.cos(a) * 4.5, iy + Math.sin(a) * 4.5); x.stroke();
+      }
+    });
+  }
+  function statusBurn(r) {
+    const S = Math.ceil(r * 2.6);
+    return mk(S, S, (x, w) => {
+      const c = w / 2;
+      const g = x.createRadialGradient(c, c, r * 0.1, c, c, r * 0.9);
+      g.addColorStop(0, 'rgba(255,167,38,.6)'); g.addColorStop(1, 'rgba(255,87,34,0)');
+      x.fillStyle = g; x.beginPath(); x.arc(c, c, r * 0.9, 0, 7); x.fill();
+    });
+  }
+  // Elite ring — one drawImage instead of a stroked arc + glow per elite.
+  function eliteRing(color) {
+    const S = 96;
+    return mk(S, S, (x, w) => {
+      const c = w / 2;
+      x.strokeStyle = color; x.lineWidth = 3; x.globalAlpha = 0.9;
+      x.beginPath(); x.arc(c, c, 34, 0, 7); x.stroke();
+      x.globalAlpha = 0.28; x.lineWidth = 10;
+      x.beginPath(); x.arc(c, c, 34, 0, 7); x.stroke();
+      x.globalAlpha = 0.5; x.lineWidth = 1.5;
+      for (let k = 0; k < 8; k++) {
+        const a = k / 8 * 6.283;
+        x.beginPath();
+        x.moveTo(c + Math.cos(a) * 38, c + Math.sin(a) * 38);
+        x.lineTo(c + Math.cos(a) * 45, c + Math.sin(a) * 45);
+        x.stroke();
+      }
+    });
+  }
+
+  // ---------------- Projectile art ----------------
+  // Every weapon used to render as the same flat circle. Each archetype now has
+  // a pre-baked, tinted sprite so weapon fantasy actually reads on screen.
+  function projSprite(kind, color, size) {
+    const S = Math.ceil(size * 6) + 8;
+    return mk(S, S, (x, w, h) => {
+      const c = w / 2, r = size;
+      x.translate(c, c);
+      if (kind === 'bolt') {                 // elongated capsule + trail
+        const g = x.createLinearGradient(-r * 2.6, 0, r * 1.4, 0);
+        g.addColorStop(0, 'rgba(255,255,255,0)'); g.addColorStop(1, color);
+        x.fillStyle = g;
+        x.beginPath(); x.ellipse(-r * 0.6, 0, r * 2.2, r * 0.72, 0, 0, 7); x.fill();
+        x.fillStyle = color;
+        x.beginPath(); x.arc(0, 0, r, 0, 7); x.fill();
+        x.fillStyle = 'rgba(255,255,255,.9)';
+        x.beginPath(); x.arc(r * 0.22, -r * 0.2, r * 0.42, 0, 7); x.fill();
+      } else if (kind === 'shard') {         // rotating triangle
+        x.fillStyle = color;
+        x.beginPath(); x.moveTo(r * 1.5, 0); x.lineTo(-r, r * 0.9); x.lineTo(-r * 0.4, 0); x.lineTo(-r, -r * 0.9);
+        x.closePath(); x.fill();
+        x.strokeStyle = 'rgba(255,255,255,.75)'; x.lineWidth = 1; x.stroke();
+      } else if (kind === 'orb') {           // soft glowing sphere
+        const g = x.createRadialGradient(-r * 0.3, -r * 0.3, r * 0.1, 0, 0, r * 1.5);
+        g.addColorStop(0, '#fff'); g.addColorStop(0.35, color); g.addColorStop(1, 'rgba(0,0,0,0)');
+        x.fillStyle = g; x.beginPath(); x.arc(0, 0, r * 1.5, 0, 7); x.fill();
+      } else if (kind === 'wave') {          // crescent slab
+        x.strokeStyle = color; x.lineWidth = r * 0.85; x.lineCap = 'round';
+        x.beginPath(); x.arc(-r * 0.5, 0, r * 1.25, -1.1, 1.1); x.stroke();
+        x.strokeStyle = 'rgba(255,255,255,.55)'; x.lineWidth = r * 0.3;
+        x.beginPath(); x.arc(-r * 0.5, 0, r * 1.25, -0.8, 0.8); x.stroke();
+      } else {                               // 'dot' — small, crisp
+        x.fillStyle = color;
+        x.beginPath(); x.arc(0, 0, r, 0, 7); x.fill();
+        x.fillStyle = 'rgba(255,255,255,.8)';
+        x.beginPath(); x.arc(-r * 0.25, -r * 0.25, r * 0.4, 0, 7); x.fill();
+      }
+    });
+  }
+  // Enemy bullets follow the threat colour law: never green, always outlined.
+  function enemyBullet(size) {
+    const S = size * 6;
+    return mk(S, S, (x, w) => {
+      const c = w / 2;
+      const g = x.createRadialGradient(c, c, 1, c, c, size * 2.4);
+      g.addColorStop(0, 'rgba(255,255,255,.9)'); g.addColorStop(0.4, '#ff4081'); g.addColorStop(1, 'rgba(255,64,129,0)');
+      x.fillStyle = g; x.beginPath(); x.arc(c, c, size * 2.4, 0, 7); x.fill();
+      x.fillStyle = '#fff'; x.beginPath(); x.arc(c, c, size * 0.5, 0, 7); x.fill();
+      x.strokeStyle = 'rgba(60,0,25,.9)'; x.lineWidth = 1.5;
+      x.beginPath(); x.arc(c, c, size, 0, 7); x.stroke();
+    });
+  }
+  // Soft radial used for the additive light layer + puff particles.
+  function glow(color) {
+    return mk(64, 64, (x, w) => {
+      const g = x.createRadialGradient(32, 32, 0, 32, 32, 32);
+      g.addColorStop(0, color); g.addColorStop(1, 'rgba(0,0,0,0)');
+      x.fillStyle = g; x.fillRect(0, 0, w, w);
+    });
+  }
+  function chestSprite(open) {
+    return mk(44, 40, (x, w, h) => {
+      x.fillStyle = 'rgba(0,0,0,.25)';
+      x.beginPath(); x.ellipse(w / 2, h - 4, 16, 5, 0, 0, 7); x.fill();
+      x.fillStyle = '#6d4c41'; rr(x, 6, 14, w - 12, h - 18, 4); x.fill();
+      x.strokeStyle = '#3e2723'; x.lineWidth = 2; x.stroke();
+      x.fillStyle = open ? '#8d6e63' : '#795548';
+      if (open) { x.save(); x.translate(w / 2, 15); x.rotate(-0.7); rr(x, -16, -11, 32, 12, 4); x.fill(); x.restore(); }
+      else { rr(x, 5, 6, w - 10, 12, 4); x.fill(); }
+      x.strokeStyle = '#ffd54f'; x.lineWidth = 2;
+      x.beginPath(); x.moveTo(6, 20); x.lineTo(w - 6, 20); x.stroke();
+      x.fillStyle = '#ffd54f';
+      x.beginPath(); x.arc(w / 2, 22, 3.4, 0, 7); x.fill();
+      if (open) { x.fillStyle = 'rgba(255,213,79,.55)'; x.beginPath(); x.ellipse(w / 2, 16, 15, 7, 0, 0, 7); x.fill(); }
+    });
+  }
+
   // ---------------- Cache & init ----------------
   const cache = {};
   function get(key, maker) {
@@ -409,15 +591,37 @@ const Sprites = (() => {
     get('gemS', () => gem('#69f0ae', 14));
     get('gemM', () => gem('#40c4ff', 16));
     get('gemL', () => gem('#ffd740', 20));
+    get('gemXL', () => gem('#ff80ab', 24));    // elite gem
+    get('gemBoss', () => gem('#fff59d', 28));  // boss gem
     get('heart', heart);
-    get('ground_land', () => groundTile('land'));
-    get('ground_sea', () => groundTile('sea'));
-    get('ground_sky', () => groundTile('sky'));
-    get('ground', () => groundTile('land'));   // legacy alias
+    for (const b of ['land', 'sea', 'sky']) get('ground_' + b, () => groundBaked(b));
     get('palm', palm);
     get('rock', rock);
     get('bush', bush);
+    get('chest', () => chestSprite(false));
+    get('chestOpen', () => chestSprite(true));
+    get('ebullet', () => enemyBullet(8));
+    get('glowW', () => glow('rgba(255,255,255,.85)'));
+    get('glowGold', () => glow('rgba(255,213,79,.9)'));
+    // status overlays at the few radii actually used, rounded to 4px buckets
+    for (let r = 12; r <= 44; r += 4) {
+      get('poison' + r, () => statusPoison(r));
+      get('frost' + r, () => statusFrost(r));
+      get('burn' + r, () => statusBurn(r));
+    }
+    for (const a of ELITE_AFFIXES) get('elite_' + a.id, () => eliteRing(a.color));
   }
 
-  return { init, get, portrait, shade };
+  // Projectile sprites are made on demand and cached by (kind,color,size) —
+  // the set is small and bounded because size is bucketed to whole pixels.
+  function proj(kind, color, size) {
+    const s = Math.max(2, Math.round(size));
+    return get(`p_${kind}_${color}_${s}`, () => projSprite(kind, color, s));
+  }
+  function statusFx(kind, r) {
+    const b = Math.min(44, Math.max(12, Math.round(r / 4) * 4));
+    return get(kind + b, () => (kind === 'poison' ? statusPoison : kind === 'frost' ? statusFrost : statusBurn)(b));
+  }
+
+  return { init, get, portrait, shade, proj, statusFx, groundTile };
 })();
