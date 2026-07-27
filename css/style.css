@@ -71,7 +71,17 @@ html, body {
 .set-row.toggle input { width:22px; height:22px; accent-color:#ffd54f; }
 .set-danger { display:flex; gap:8px; flex-wrap:wrap; justify-content:center; margin-top:8px; }
 .menu-btn2.danger { color:#ff8a80; border-color:rgba(255,90,90,.55); }
-#roster-btns { display:flex; gap:10px; align-items:center; justify-content:center; flex-wrap:wrap; margin-top:8px; }
+/* The roster grid grows with every Guardian you free, and the buttons used to
+   flow after it — with a full roster on a 390px-tall landscape screen, RESUME
+   scrolled off the bottom and the player couldn't find it. The grid now scrolls
+   inside the screen and the controls stay pinned. */
+#screen-roster { justify-content:flex-start; padding-bottom:0; }
+#roster-grid { flex:1 1 auto; min-height:0; overflow-y:auto; align-content:start; }
+#roster-btns {
+  display:flex; gap:10px; align-items:center; justify-content:center; flex-wrap:wrap;
+  flex:0 0 auto; width:100%; padding:8px 0 calc(8px + env(safe-area-inset-bottom));
+  background:linear-gradient(transparent, rgba(4,16,22,.95) 35%);
+}
 #howto-body { width:min(680px,94vw); overflow-y:auto; max-height:80vh; padding:6px 10px 20px; font-size:clamp(12px,2.5vh,15px); line-height:1.5; color:#e4d9ec; }
 #howto-body h3 { color:#ffd54f; font-size:clamp(13px,2.8vh,16px); letter-spacing:2px; margin:12px 0 5px; border-bottom:1px solid rgba(255,213,79,.25); padding-bottom:3px; }
 #howto-body .ht-row { display:flex; gap:10px; align-items:baseline; margin:5px 0; }

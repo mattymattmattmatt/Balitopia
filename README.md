@@ -122,9 +122,13 @@ implemented the Fullscreen API, so that is the only route to a chrome-free game.
 ### Building for deploy
 
 ```bash
-tools/encode_audio.sh    # 100 MB of MP3/WAV -> ~8 MB of Opus + AAC (needs ffmpeg)
+tools/encode_audio.sh    # 100.8 MB of MP3/WAV -> 17.9 MB of Opus (+AAC fallback)
 tools/build.sh           # emits dist/ with only what the game actually loads
 ```
+
+A complete first session transfers **5.1 MB**, and repeat visits are near-zero
+thanks to the service worker. Hero themes ship only as a 14-second hook — it
+serves both the select-screen preview and the in-game possession flourish.
 
 `assets/3d/` (50 MB) and `assets/art/` (60 MB) are production sources and are **excluded
 from the build** — a naive folder copy would ship 110 MB the game never requests.
