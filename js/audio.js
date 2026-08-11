@@ -297,12 +297,25 @@ const Sound = (() => {
     const old = musicEl;
     musicPath = path;
     musicBase = vol;
-    const el = new Audio(src('assets/audio/' + path));
+    const raw = 'assets/audio/' + path, resolved = src(raw);
+    const el = new Audio(resolved);
     el.loop = loop;
     el.volume = 0;
     el.muted = muted;
     el.play().catch(() => { if (loop) startMusic(); });
-    el.onerror = () => { if (loop && musicEl === el) startMusic(); };
+    // A freshly generated track exists only as .mp3 until encode_audio.sh has
+    // run. Retry the master once before falling back to the synth loop, so a
+    // source checkout plays the real music instead of the chiptune stand-in.
+    el.onerror = () => {
+      if (musicEl !== el) return;
+      if (resolved !== raw && !el.dataset.fellBack) {
+        el.dataset.fellBack = '1';
+        el.src = raw;
+        el.play().catch(() => { if (loop) startMusic(); });
+        return;
+      }
+      if (loop) startMusic();
+    };
     musicEl = el;
     const t0 = performance.now();
     clearInterval(fadeTimer);
