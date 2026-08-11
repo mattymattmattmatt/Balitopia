@@ -39,7 +39,7 @@ const MUSIC_TRACKS = {
   'enemies/glob.mp3': 'Arcade final boss theme, intense epic arcade music, powerful dramatic synth, climactic battle music, loopable 30 second',
 };
 
-async function generateAudio(outputPath, description) {
+async function generateAudio(outputPath, description, isMusic = false) {
   return new Promise((resolve, reject) => {
     // ElevenLabs max duration is 30 seconds
     let duration = 20;
@@ -52,9 +52,10 @@ async function generateAudio(outputPath, description) {
       prompt_influence: 0.3,
     });
 
+    const endpoint = isMusic ? '/v1/generate-music' : '/v1/sound-generation';
     const options = {
       hostname: 'api.elevenlabs.io',
-      path: '/v1/sound-generation',
+      path: endpoint,
       method: 'POST',
       headers: {
         'xi-api-key': API_KEY,
@@ -126,7 +127,8 @@ async function main() {
   for (const [outputPath, description] of Object.entries(allTracks)) {
     try {
       const fullPath = path.join(__dirname, '../assets/audio', outputPath);
-      await generateAudio(fullPath, description);
+      const isMusic = outputPath.startsWith('music/') || outputPath.startsWith('enemies/');
+      await generateAudio(fullPath, description, isMusic);
       successful++;
       await new Promise(r => setTimeout(r, 100));
     } catch (error) {
