@@ -4800,10 +4800,14 @@ function endGame() {
   const won = G.victory = G.bossKills > 0;
   Sound.stopMusic(0.6);
   Sound.stopFlourish();
-  Sound.playFile('assets/audio/sfx/captured.mp3', 0.9);
+  // A win and a loss both used to land on the same "captured" cue. The loss
+  // now gets the purpose-made death stinger, and the gap before the theme is
+  // sized to it so the two don't talk over each other.
+  if (won) Sound.playFile('assets/audio/sfx/captured.mp3', 0.9);
+  else Sound.sfx.death();
   setTimeout(() => {
     if (G.over) Sound.playMusic(won ? 'music/victory.mp3' : 'music/bgm_gameover.mp3', { loop: false, vol: 0.6 });
-  }, 1800);
+  }, won ? 1800 : 1200);
   G.score = computeScore();
   const rank = saveRun(G.score);
   setTimeout(() => {

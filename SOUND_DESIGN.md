@@ -68,6 +68,40 @@ If you generate these I'll wire them in — tell me and I'll hook them up:
 
 ---
 
+## Generating from the API instead (`scripts/`)
+
+The scripted path replaces steps 1–4 above. `.env` holds `ELEVENLABS_API_KEY`
+(gitignored); `npm i` first.
+
+```bash
+npm run gen-sfx              # sound-generation endpoint -> assets/audio/sfx
+npm run gen-music            # music endpoint -> assets/audio/{music,enemies}
+npm run gen-music -- --force # regenerate tracks that already exist
+scripts/trim-sfx.sh          # MUST run after gen-sfx (see below)
+tools/encode_audio.sh        # refresh the shipped .opus/.m4a set
+```
+
+Both generators skip files already on disk, so a re-run costs no credits.
+
+**Why the trim step is mandatory.** The sound-generation endpoint fills the
+entire requested duration with several takes of the effect separated by
+silence — ask for 20s and you get roughly four takes of a 0.6s sound. Left
+alone, every hit spawns a 20-second element, overlapping hits stack
+20-second tails, and each cue encodes to ~170 KB instead of ~8 KB. Several
+files also open with up to two seconds of lead-in silence, so the trimmer
+finds where the sound starts as well as where it ends. It normalises to
+−16 LUFS and is idempotent.
+
+The music endpoint behaves differently — it returns one continuous track of
+the requested length and needs no trimming. Its ceiling is 30s per request;
+`scripts/generate-music.js` carries the per-track lengths and loop-worded
+prompts.
+
+**Caveat:** "seamless loop" is a hint to the model, not a guarantee. Listen
+to each region track wrap at least once before shipping.
+
+---
+
 ### Reference: where each core sound is triggered in code
 
 `js/game.js` calls `Sound.sfx.<name>()`; `js/audio.js` maps each to `assets/audio/sfx/<name>.mp3`

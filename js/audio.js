@@ -212,6 +212,7 @@ const Sound = (() => {
     chestTick()  { blip(900 + Math.random() * 200, 0.05, 'square', 0.07); },
     eliteSpawn() { duckFor(0.7); blip(180, 0.4, 'sawtooth', 0.18, -60); noise(0.25, 0.14, 600); },
     bossAppear() { duckFor(1.4); fileOr('boss-appear', 1.0, () => { blip(140, 0.6, 'sawtooth', 0.26, -50); noise(0.5, 0.2, 500); }); },
+    death()      { fileOr('death', 0.95, () => [392, 349, 294, 220].forEach((f, i) => setTimeout(() => blip(f, 0.3, 'triangle', 0.2), i * 160))); },
     surge()      { duckFor(0.9); noise(0.5, 0.22, 480); blip(110, 0.5, 'sine', 0.18, 60); },
     unlock()     { duckFor(1.2); fileOr('guardian-freed', 0.95, () => [659, 784, 988, 1319, 1568].forEach((f, i) => setTimeout(() => blip(f, 0.22, 'triangle', 0.2), i * 90))); },
     combo(n)     { if (ok('combo', 60)) fileOr('combo-hit', Math.min(0.7, 0.3 + n * 0.01), () => blip(500 + Math.min(900, n * 22), 0.05, 'sine', 0.06, 90)); },
