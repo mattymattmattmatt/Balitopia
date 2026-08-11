@@ -837,7 +837,7 @@ function breakCage(c) {
   freedSet.add(c.heroIdx);
   spawnParts(c.x, c.y, '#d7a86e', 20, 190);
   spawnParts(c.x, c.y, HEROES[c.heroIdx].accent, 16, 160);
-  Sound.playFile('assets/audio/sfx/shatter.wav', 0.8);
+  Sound.sfx.cageBreak();
   Sound.playFile(`assets/audio/heroes/${HEROES[c.heroIdx].id}_entrance.wav`, 0.9);
   G.healPct(0.25);
   banner(`${HEROES[c.heroIdx].name.toUpperCase()} JOINED THE FIGHT!`);
@@ -1493,10 +1493,12 @@ function spawnBoss() {
   } else G.boss2 = null;
   if (isReef) {
     G.boss.spd = 0;   // stationary arena boss — forces circle-strafing, not kiting
+    Sound.sfx.bossAppear();
     Sound.playMusic('enemies/demonder.mp3', { fade: 1.2 });
     banner('🪸 THE REEF MOTHER RISES 🪸');
     banner('Her beams sweep the shallows. Keep moving around her.');
   } else {
+    Sound.sfx.bossAppear();
     Sound.playMusic('enemies/glob.mp3', { fade: 1.2 });
     Sound.playFile('assets/audio/enemies/glob_entrance.wav', 0.95);
     schedule(1.4, () => Sound.playFile('assets/audio/enemies/glob_laugh.wav', 0.9));
@@ -4798,10 +4800,14 @@ function endGame() {
   const won = G.victory = G.bossKills > 0;
   Sound.stopMusic(0.6);
   Sound.stopFlourish();
-  Sound.playFile('assets/audio/sfx/captured.mp3', 0.9);
+  // A win and a loss both used to land on the same "captured" cue. The loss
+  // now gets the purpose-made death stinger, and the gap before the theme is
+  // sized to it so the two don't talk over each other.
+  if (won) Sound.playFile('assets/audio/sfx/captured.mp3', 0.9);
+  else Sound.sfx.death();
   setTimeout(() => {
     if (G.over) Sound.playMusic(won ? 'music/victory.mp3' : 'music/bgm_gameover.mp3', { loop: false, vol: 0.6 });
-  }, 1800);
+  }, won ? 1800 : 1200);
   G.score = computeScore();
   const rank = saveRun(G.score);
   setTimeout(() => {

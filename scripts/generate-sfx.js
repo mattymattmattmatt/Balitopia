@@ -82,12 +82,18 @@ async function generateSound(name, description) {
 }
 
 async function main() {
+  const force = process.argv.includes('--force');
   console.log('🎵 Generating Balitopia arcade sound effects...\n');
 
   let successful = 0;
   let failed = 0;
 
   for (const [name, description] of Object.entries(SOUNDS)) {
+    // credits are finite — never re-buy a sound that is already on disk
+    if (!force && fs.existsSync(path.join(OUTPUT_DIR, `${name}.mp3`))) {
+      console.log(`· ${name}.mp3 (exists, skipped)`);
+      continue;
+    }
     try {
       await generateSound(name, description);
       successful++;
