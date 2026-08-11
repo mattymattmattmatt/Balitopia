@@ -1,7 +1,7 @@
 {
   "scripts": {
     "gen-sfx": "node scripts/generate-sfx.js",
-    "gen-audio": "node scripts/generate-audio.js"
+    "gen-music": "node scripts/generate-music.js"
   },
   "dependencies": {
     "dotenv": "^17.4.2"
