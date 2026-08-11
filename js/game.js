@@ -837,7 +837,7 @@ function breakCage(c) {
   freedSet.add(c.heroIdx);
   spawnParts(c.x, c.y, '#d7a86e', 20, 190);
   spawnParts(c.x, c.y, HEROES[c.heroIdx].accent, 16, 160);
-  Sound.playFile('assets/audio/sfx/shatter.wav', 0.8);
+  Sound.sfx.cageBreak();
   Sound.playFile(`assets/audio/heroes/${HEROES[c.heroIdx].id}_entrance.wav`, 0.9);
   G.healPct(0.25);
   banner(`${HEROES[c.heroIdx].name.toUpperCase()} JOINED THE FIGHT!`);
@@ -1493,10 +1493,12 @@ function spawnBoss() {
   } else G.boss2 = null;
   if (isReef) {
     G.boss.spd = 0;   // stationary arena boss — forces circle-strafing, not kiting
+    Sound.sfx.bossAppear();
     Sound.playMusic('enemies/demonder.mp3', { fade: 1.2 });
     banner('🪸 THE REEF MOTHER RISES 🪸');
     banner('Her beams sweep the shallows. Keep moving around her.');
   } else {
+    Sound.sfx.bossAppear();
     Sound.playMusic('enemies/glob.mp3', { fade: 1.2 });
     Sound.playFile('assets/audio/enemies/glob_entrance.wav', 0.95);
     schedule(1.4, () => Sound.playFile('assets/audio/enemies/glob_laugh.wav', 0.9));

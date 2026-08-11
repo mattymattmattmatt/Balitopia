@@ -109,7 +109,17 @@ const Sound = (() => {
     let a = pool.find(x => x.paused || x.ended);
     if (!a) {
       if (pool.length >= 5) a = pool[0];
-      else { a = new Audio(src(`assets/audio/sfx/${name}.mp3`)); pool.push(a); }
+      else {
+        const raw = `assets/audio/sfx/${name}.mp3`, resolved = src(raw);
+        a = new Audio(resolved);
+        // Newly generated samples ship as .mp3 only until tools/build.sh has
+        // transcoded them. Without this the encoded-set rewrite points at an
+        // .opus that isn't there yet and the cue is silently dropped.
+        if (resolved !== raw) a.addEventListener('error', () => {
+          if (!a.dataset.fellBack) { a.dataset.fellBack = '1'; a.src = raw; a.play().catch(() => {}); }
+        }, { once: true });
+        pool.push(a);
+      }
     }
     a.volume = vol == null ? 0.8 : vol;
     try { a.currentTime = 0; } catch (e) {}
@@ -120,6 +130,25 @@ const Sound = (() => {
     if (muted) return;
     if (sfxHas[name]) playSample(name, vol);
     else if (synth) synth();
+  };
+  // First name that shipped wins. Lets a cue name a new sample and keep the
+  // old one as the fallback, so a half-generated audio folder still plays.
+  const fileAnyOr = (names, vol, synth) => {
+    if (muted) return;
+    const n = names.find(x => sfxHas[x]);
+    if (n) playSample(n, vol);
+    else if (synth) synth();
+  };
+  // Round-robin across variants so a stream of identical hits doesn't turn
+  // into a machine-gun of the exact same waveform.
+  const rr = {};
+  const fileCycleOr = (names, vol, synth) => {
+    if (muted) return;
+    const have = names.filter(x => sfxHas[x]);
+    if (!have.length) { if (synth) synth(); return; }
+    const k = names[0];
+    const i = (rr[k] = ((rr[k] || 0) + 1)) % have.length;
+    playSample(have[i], vol);
   };
 
   // Per-archetype weapon voices. One sound for 24 weapons made every Guardian
@@ -139,7 +168,7 @@ const Sound = (() => {
   // ------- public SFX -------
   const S = {
     // UI (no synth fallback — menus were silent before, sample is pure polish)
-    uiClick()    { fileOr('ui_click', 0.55); },
+    uiClick()    { fileAnyOr(['button-click', 'ui_click'], 0.55); },
     uiBack()     { fileOr('ui_back', 0.55); },
     uiSelect()   { if (ok('uiSelect', 40)) fileOr('ui_select', 0.45); },
     // combat
@@ -153,36 +182,39 @@ const Sound = (() => {
     // THE missing sound: hit.mp3 shipped in the manifest and nothing ever
     // called this, so every hit in the game landed in silence.
     hit(crit) {
-      if (crit) { fileOr('hit', 0.85, () => { noise(0.06, 0.16, 2600); blip(1100, 0.09, 'square', 0.09, -600); }); return; }
+      const V = ['enemy-hit-1', 'enemy-hit-2', 'enemy-hit-3', 'hit'];
+      if (crit) { fileCycleOr(V, 0.85, () => { noise(0.06, 0.16, 2600); blip(1100, 0.09, 'square', 0.09, -600); }); return; }
       if (!ok('hit', 45)) return;
-      fileOr('hit', 0.42, () => noise(0.04, 0.07, 1500));
+      fileCycleOr(V, 0.42, () => noise(0.04, 0.07, 1500));
     },
     kill()       { if (ok('kill', 60)) fileOr('kill', 0.6, () => { blip(300, 0.12, 'sawtooth', 0.1, -180); noise(0.08, 0.1, 900); }); },
     bigKill()    { blip(160, 0.3, 'sawtooth', 0.2, -110); noise(0.25, 0.22, 500); },
     slam()       { duckFor(0.6); noise(0.3, 0.3, 380); blip(90, 0.34, 'sine', 0.28, -40); },
-    hurt()       { fileOr('hurt', 0.8, () => blip(180, 0.2, 'sawtooth', 0.22, -90)); },
+    hurt()       { fileAnyOr(['player-damage', 'hurt'], 0.8, () => blip(180, 0.2, 'sawtooth', 0.22, -90)); },
     gem()        { if (ok('gem', 60)) fileOr('gem', 0.5, () => blip(880 + Math.random() * 220, 0.08, 'sine', 0.12, 300)); },
     heal()       { fileOr('heal', 0.75, () => { playFile('assets/audio/sfx/catch.wav', 0.7); blip(520, 0.18, 'sine', 0.1, 260); }); },
     level()      { duckFor(0.9); fileOr('levelup', 0.85, () => [440, 554, 659, 880].forEach((f, i) => setTimeout(() => blip(f, 0.16, 'triangle', 0.2), i * 90))); },
     tierup()     { duckFor(1.0); fileOr('tierup', 0.9, () => [523, 659, 784, 1047].forEach((f, i) => setTimeout(() => blip(f, 0.18, 'triangle', 0.22), i * 70))); },
-    powerReady() { duckFor(0.7); fileOr('power_ready', 0.8, () => [784, 1047, 1319].forEach((f, i) => setTimeout(() => blip(f, 0.14, 'sine', 0.18), i * 60))); },
-    powershot()  { duckFor(1.1); fileOr('powershot', 1.0, () => { blip(140, 0.5, 'sawtooth', 0.3, 120); noise(0.4, 0.3, 900); }); },
+    powerReady() { duckFor(0.7); fileAnyOr(['powershot-charge', 'power_ready'], 0.8, () => [784, 1047, 1319].forEach((f, i) => setTimeout(() => blip(f, 0.14, 'sine', 0.18), i * 60))); },
+    powershot()  { duckFor(1.1); fileAnyOr(['powershot-fire', 'powershot'], 1.0, () => { blip(140, 0.5, 'sawtooth', 0.3, 120); noise(0.4, 0.3, 900); }); },
     cageHit()    { if (ok('cageHit', 90)) { blip(240, 0.06, 'square', 0.1, -60); noise(0.04, 0.1, 2200); } },
-    possess()    { blip(200, 0.3, 'sine', 0.2, 700); blip(900, 0.25, 'sine', 0.12, -500); },
+    cageBreak()  { duckFor(0.6); fileOr('cage-break', 0.9, () => { noise(0.22, 0.24, 3200); blip(300, 0.2, 'square', 0.16, -160); }); },
+    possess()    { fileOr('possession', 0.85, () => { blip(200, 0.3, 'sine', 0.2, 700); blip(900, 0.25, 'sine', 0.12, -500); }); },
     nova()       { if (ok('nova', 120)) noise(0.18, 0.18, 700); },
     bossHit()    { if (ok('bossHit', 130)) noise(0.07, 0.12, 700); },
     // new cues
-    dash()       { if (ok('dash', 90)) { noise(0.12, 0.11, 2200); blip(700, 0.09, 'sine', 0.06, 500); } },
+    dash()       { if (ok('dash', 90)) fileOr('dash', 0.6, () => { noise(0.12, 0.11, 2200); blip(700, 0.09, 'sine', 0.06, 500); }); },
     soul()       { blip(660, 0.16, 'sine', 0.1, 330); },
     wardUp()     { blip(440, 0.2, 'sine', 0.08, 220); },
-    wardBreak()  { duckFor(0.5); noise(0.16, 0.2, 3000); blip(880, 0.16, 'triangle', 0.14, -420); },
+    wardBreak()  { duckFor(0.5); fileOr('shield-break', 0.8, () => { noise(0.16, 0.2, 3000); blip(880, 0.16, 'triangle', 0.14, -420); }); },
     brink()      { duckFor(0.8); blip(120, 0.5, 'sine', 0.2, -40); },
     chest()      { duckFor(1.0); [523, 659, 784, 1047, 1319].forEach((f, i) => setTimeout(() => blip(f, 0.2, 'triangle', 0.2), i * 70)); },
     chestTick()  { blip(900 + Math.random() * 200, 0.05, 'square', 0.07); },
     eliteSpawn() { duckFor(0.7); blip(180, 0.4, 'sawtooth', 0.18, -60); noise(0.25, 0.14, 600); },
+    bossAppear() { duckFor(1.4); fileOr('boss-appear', 1.0, () => { blip(140, 0.6, 'sawtooth', 0.26, -50); noise(0.5, 0.2, 500); }); },
     surge()      { duckFor(0.9); noise(0.5, 0.22, 480); blip(110, 0.5, 'sine', 0.18, 60); },
-    unlock()     { duckFor(1.2); [659, 784, 988, 1319, 1568].forEach((f, i) => setTimeout(() => blip(f, 0.22, 'triangle', 0.2), i * 90)); },
-    combo(n)     { if (ok('combo', 60)) blip(500 + Math.min(900, n * 22), 0.05, 'sine', 0.06, 90); },
+    unlock()     { duckFor(1.2); fileOr('guardian-freed', 0.95, () => [659, 784, 988, 1319, 1568].forEach((f, i) => setTimeout(() => blip(f, 0.22, 'triangle', 0.2), i * 90))); },
+    combo(n)     { if (ok('combo', 60)) fileOr('combo-hit', Math.min(0.7, 0.3 + n * 0.01), () => blip(500 + Math.min(900, n * 22), 0.05, 'sine', 0.06, 90)); },
   };
   probeSfx();
   probeEncoded();
