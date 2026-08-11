@@ -29,21 +29,26 @@ const SFX_LIST = [
 
 // Music and longer audio tracks
 const MUSIC_TRACKS = {
-  'music/region-land.mp3': 'Arcade chiptune battle music, fast-paced upbeat dance rhythm, tropical island theme, 60 seconds',
-  'music/region-sea.mp3': 'Arcade chiptune battle music, oceanic waves theme, upbeat synth melody, maritime adventure, 60 seconds',
-  'music/region-sky.mp3': 'Arcade chiptune battle music, ethereal celestial theme, floating through clouds, epic synth, 60 seconds',
+  'music/region-land.mp3': 'Arcade chiptune battle music, fast-paced upbeat dance rhythm, tropical island theme, loopable 30 second loop',
+  'music/region-sea.mp3': 'Arcade chiptune battle music, oceanic waves theme, upbeat synth melody, maritime adventure, loopable 30 second loop',
+  'music/region-sky.mp3': 'Arcade chiptune battle music, ethereal celestial theme, floating through clouds, epic synth, loopable 30 second loop',
   'music/title.mp3': 'Arcade chiptune title screen music, heroic fanfare, vibrant energetic tune, welcoming bright melody, 30 seconds',
-  'music/bgm_gameover.mp3': 'Arcade sad game over music, minor key descending melody, melancholic chiptune, defeat theme, 20 seconds',
-  'music/victory.mp3': 'Arcade victory fanfare, triumphant uplifting chime, celebratory notes, heroic synth, 15 seconds',
-  'enemies/demonder.mp3': 'Arcade boss battle theme, dark ominous arcade synth, intense threatening music, scary enemy encounter, 45 seconds',
-  'enemies/glob.mp3': 'Arcade final boss theme, intense epic arcade music, powerful dramatic synth, climactic battle music, 45 seconds',
+  'music/bgm_gameover.mp3': 'Arcade sad game over music, minor key descending melody, melancholic chiptune, defeat theme, 25 seconds',
+  'music/victory.mp3': 'Arcade victory fanfare, triumphant uplifting chime, celebratory notes, heroic synth, 20 seconds',
+  'enemies/demonder.mp3': 'Arcade boss battle theme, dark ominous arcade synth, intense threatening music, scary enemy encounter, loopable 30 second',
+  'enemies/glob.mp3': 'Arcade final boss theme, intense epic arcade music, powerful dramatic synth, climactic battle music, loopable 30 second',
 };
 
 async function generateAudio(outputPath, description) {
   return new Promise((resolve, reject) => {
+    // ElevenLabs max duration is 30 seconds
+    let duration = 20;
+    if (description.includes('30')) duration = 30;
+    else if (description.includes('25')) duration = 25;
+
     const data = JSON.stringify({
       text: description,
-      duration_seconds: description.includes('60') ? 60 : description.includes('45') ? 45 : description.includes('30') ? 30 : 20,
+      duration_seconds: duration,
       prompt_influence: 0.3,
     });
 
