@@ -12,12 +12,14 @@ const VIEW_H = 540;                 // logical viewport height (world px) — re
 // 21:9 phone doesn't get 30% more sight-line than a 4:3 tablet.
 // Raised from 540k: the previous value was noticeably tighter than the old
 // fixed-540px-height framing, and the squad needs room to read.
-const VIEW_AREA = 760 * 1000;
+const VIEW_AREA = 860 * 1000;
 // ...and the view widens as you free Guardians. A 24-strong squad plus its
 // projectiles simply needs more screen than a lone Guardian does, so the camera
-// opens up a little with every cage you break.
-const VIEW_PER_FREED = 0.016;       // +1.6% linear view per Guardian
-const VIEW_FREED_CAP = 0.30;        // ...up to +30%
+// opens up a little with every cage you break. Raised from 1.6%/30%: a full
+// roster still crowded the frame, and the wider view doubles as headroom for
+// the fill-rate work — fewer pixels per world unit at the same resolution.
+const VIEW_PER_FREED = 0.022;       // +2.2% linear view per Guardian
+const VIEW_FREED_CAP = 0.46;        // ...up to +46%
 let viewMul = 1, viewMulTarget = 1; // declared here: resize() runs before G exists
 const WORLD = 5200;                 // world is WORLD x WORLD
 const CELL = 88;                    // spatial hash cell
@@ -34,10 +36,19 @@ const DASH_IFRAME = 0.32;
 // and profiling showed the frame is fill-bound, not JS-bound. Measured on a
 // 3x-density viewport with 300 enemies: dpr 1.75 -> 1.0 doubled the frame rate.
 // This art is soft and painted, not pixel art, so 1.25 is visually fine.
+// `maxEnemies` caps how many can be ALIVE at once. Measured on a 4x-throttled
+// profile of the worst case (a full roster in a saturated horde): the horde
+// saturating at the 300-strong pool costs ~27% of the frame rate against a
+// 160 cap, and the curve is flat below that — so the cap buys most of what a
+// low resolution does, without softening the picture.
 const QUALITY = {
-  high:     { parts: 1.0, statusFx: 34, dpr: 1.3, light: 1, decor: 1.0,  trails: 1, lightScale: 0.45 },
-  balanced: { parts: 0.55, statusFx: 18, dpr: 1.05, light: 1, decor: 0.7,  trails: 1, lightScale: 0.36 },
-  battery:  { parts: 0.25, statusFx: 8,  dpr: 0.9, light: 1, decor: 0.4, trails: 0, lightScale: 0.3 },
+  high:     { parts: 1.0,  statusFx: 34, dpr: 1.3,  light: 1, decor: 1.0,  trails: 1, lightScale: 0.45, maxEnemies: 300 },
+  balanced: { parts: 0.55, statusFx: 18, dpr: 1.05, light: 1, decor: 0.7,  trails: 1, lightScale: 0.36, maxEnemies: 300 },
+  battery:  { parts: 0.25, statusFx: 8,  dpr: 0.9,  light: 1, decor: 0.4,  trails: 0, lightScale: 0.3,  maxEnemies: 230 },
+  // The floor of the ladder, and the one a struggling phone should sit on.
+  // Keeps the light pass — dropping it measured worth only ~8% and costs the
+  // entire look — and spends the budget on resolution and entity count instead.
+  perf:     { parts: 0.18, statusFx: 6,  dpr: 0.8,  light: 1, decor: 0.3,  trails: 0, lightScale: 0.28, maxEnemies: 150 },
 };
 let LIGHT_SCALE = 0.5, LIGHT_CAP = 64;   // declared before resize() first runs
 let QL = QUALITY.high;
@@ -462,7 +473,16 @@ function spawnWave(dt) {
   const rate = Math.min(16, 2.4 + t * 0.03) * ((G.diff || DIFFICULTIES[0]).menace) * (G.mut.spawn || 1);
   G.spawnAcc += rate * dt;
   const maxTier = Math.min(TIERS.length - 1, (t / 85) | 0);
-  while (G.spawnAcc >= 1) {
+  // Hold the horde at the quality preset's ceiling. Draining the accumulator
+  // rather than letting it bank means the field refills at the normal rate as
+  // enemies die, instead of dumping the whole backlog at once.
+  // Counted per spawn, not once per frame: a single frame can carry several
+  // spawns (and a mutator can stack the rate), and a frame-level check lets the
+  // whole burst through before the count refreshes.
+  const cap = QL.maxEnemies || MAX_ENEMIES;
+  let live = G.aliveEnemies || 0;
+  if (live >= cap) G.spawnAcc = Math.min(G.spawnAcc, 1);
+  while (live < cap && G.spawnAcc >= 1) {
     G.spawnAcc -= 1;
     const a = Math.random() * 6.283;
     const d = Math.hypot(viewW, VIEW_H) / 2 + 70 + Math.random() * 220;
@@ -484,6 +504,7 @@ function spawnWave(dt) {
     else if (t > 45 - early && r < Math.min(0.11, (t - (45 - early)) / 2200)) type = 'spitter';
     else if (t > 55 - early && r < Math.min(0.14, 0.025 + t / 2200)) type = 'demonder';
     const e = spawnEnemy(type, tier, x, y);
+    if (e) live++;
     // burrowers emerge UNDER the player after a telegraph, not at the ring
     if (e && type === 'burrower') {
       e.bx = e.x = clampW(player.x + (Math.random() - 0.5) * 220);
@@ -819,7 +840,20 @@ function killBoss(b) {
   schedule(2.0, () => { if (!G.over) queueOverlay(showMutatorDraft); });
   schedule(38, () => { if (!G.over) { spawnElite(); spawnElite(); } });
   Sound.playMusic('music/victory.mp3', { loop: false, vol: 0.6, fade: 0.5 });
-  schedule(9, () => { if (!G.over && !G.boss) Sound.playMusic(`music/${G.region}.mp3`, { fade: 1.5 }); });
+  // Every Glob kill moves the field music on a track. Endless rounds used to
+  // drop you back into the exact loop you'd been hearing for the last ten
+  // minutes, which made the biggest win in the run feel like nothing changed.
+  // The biome palette stays put — only what you're listening to moves.
+  G.musicRot = (G.musicRot || 0) + 1;
+  schedule(9, () => { if (!G.over && !G.boss) Sound.playMusic(`music/${battleTrack()}.mp3`, { fade: 1.5 }); });
+}
+
+// Field music for the current round. Starts on the run's own region track and
+// steps through the others as Globs fall, so a long endless run keeps moving.
+const MUSIC_ROT = ['region-land', 'region-sea', 'region-sky'];
+function battleTrack() {
+  const base = Math.max(0, MUSIC_ROT.indexOf(G.region));
+  return MUSIC_ROT[(base + (G.musicRot || 0)) % MUSIC_ROT.length];
 }
 
 function damageCage(c, dmg) {
@@ -1327,9 +1361,11 @@ function updateProjs(dt) {
 // ---------------- Enemy update ----------------
 function updateEnemies(dt) {
   const px = player.x, py = player.y;
+  let alive = 0;
   for (let i = 0; i < MAX_ENEMIES; i++) {
     const e = enemies[i];
     if (!e.alive) continue;
+    alive++;
 
     // despawn if far away (keeps the horde around the player)
     const ddx = px - e.x, ddy = py - e.y;
@@ -1454,6 +1490,7 @@ function updateEnemies(dt) {
     // contact damage
     if (dist < e.r + 15 && e.ai !== 'flee') hurtPlayer(e.dmg, enemyName(e));
   }
+  G.aliveEnemies = alive;
 }
 const enemyName = e => e.elite ? `a ${e.affix.name} ${e.type}` :
   ({ minyar: 'a Minyar', demonder: 'a Demonder', clubbo: 'a Clubbo', spitter: 'a Spitter',
@@ -2235,8 +2272,10 @@ function frame(ts) {
     if (adaptAcc >= 3) {
       const fps = adaptN / adaptAcc;
       adaptAcc = 0; adaptN = 0;
-      if (fps < 44 && QL !== QUALITY.battery) {
-        applyQuality(QL === QUALITY.high ? 'balanced' : 'battery');
+      if (fps < 44 && QL !== QUALITY.perf) {
+        // The ladder used to stop at `battery`, so a phone that still couldn't
+        // hold 44 fps there had nowhere left to go and simply stayed slow.
+        applyQuality(QL === QUALITY.high ? 'balanced' : QL === QUALITY.balanced ? 'battery' : 'perf');
         goodStreak = 0;
         banner('⚙ QUALITY LOWERED FOR SMOOTHNESS — change it in Settings');
       } else if (fps > 57 && QL !== QUALITY.high) {
@@ -2245,7 +2284,7 @@ function frame(ts) {
         // stuck there. Never oscillates: one downgrade resets the streak.
         if (++goodStreak >= 5) {
           goodStreak = 0;
-          applyQuality(QL === QUALITY.battery ? 'balanced' : 'high');
+          applyQuality(QL === QUALITY.perf ? 'battery' : QL === QUALITY.battery ? 'balanced' : 'high');
         }
       } else goodStreak = 0;
     }
@@ -2280,8 +2319,9 @@ function hitStop(dur) { if (prefs.motion) G.hitStop = Math.max(G.hitStop || 0, d
 
 function autoQuality(fps) {
   if (prefs.quality && prefs.quality !== 'auto') return;
-  const q = fps < 40 ? 'battery' : fps < 54 ? 'balanced' : 'high';
-  const cur = QL === QUALITY.high ? 'high' : QL === QUALITY.balanced ? 'balanced' : 'battery';
+  const q = fps < 28 ? 'perf' : fps < 40 ? 'battery' : fps < 54 ? 'balanced' : 'high';
+  const cur = QL === QUALITY.high ? 'high' : QL === QUALITY.balanced ? 'balanced'
+            : QL === QUALITY.battery ? 'battery' : 'perf';
   if (q !== cur) { applyQuality(q); if (q !== 'high') banner(`⚙ ${q.toUpperCase()} QUALITY — adjust in Settings`); }
 }
 // Touch devices begin on `balanced` rather than benchmarking down from `high`:
@@ -4422,7 +4462,8 @@ function newGame(heroIdx, diffIdx, daily) {
   Sound.stopPreview();
   G.region = daily ? daily.region : ['region-land', 'region-sea', 'region-sky'][(G.rng() * 3) | 0];
   G.biome = G.region.split('-')[1];
-  Sound.playMusic(`music/${G.region}.mp3`);
+  G.musicRot = 0;
+  Sound.playMusic(`music/${battleTrack()}.mp3`);
   Sound.playFile(`assets/audio/heroes/${HEROES[heroIdx].id}_entrance.wav`, 0.9);
   bannerQ.length = 0;
   banner(`${HEROES[heroIdx].name.toUpperCase()} — BREAK THE CAGES!`);
@@ -5029,7 +5070,14 @@ function bindSettings() {
   bindRange('set-daynight', 'dayNight');
   bindSel('set-stickside', 'stickSide');
   bindSel('set-sticktype', 'stickType');
-  bindSel('set-quality', 'quality');
+  // Quality has to take hold the moment it's picked. Bound through the generic
+  // binder it only wrote the pref, so the setting appeared to do nothing until
+  // the next reload — the exact moment a struggling player is looking for
+  // relief is mid-run, with the horde already on screen.
+  $('set-quality').addEventListener('change', e => {
+    prefs.quality = e.target.value; savePrefs(); Sound.sfx.uiSelect();
+    applyQuality(prefs.quality === 'auto' ? initialQuality() : prefs.quality);
+  });
   bindSel('set-fps', 'fpsCap', true);
   bindSel('set-dmgnum', 'dmgnum');
   bindSel('set-cvd', 'cvd');
@@ -5378,12 +5426,20 @@ function buildSelect() {
     card.className = 'hero-card' + (i === selectedHero ? ' selected' : '') + (locked ? ' locked' : '');
     card.dataset.idx = i;
     const un = UNLOCKS.find(u => u.id === h.id);
-    card.innerHTML = `<div class="hc-name">${locked ? '🔒' : h.name}</div>`;
+    // A locked card used to render as a bare padlock: no name, no requirement,
+    // no way to tell a challenge you haven't met from a broken button. Show who
+    // it is and what frees them, so the roster reads as a goal list.
+    card.innerHTML = locked
+      ? `<div class="hc-name">🔒 ${h.name}</div><div class="hc-req">${un ? un.desc : 'Keep playing'}</div>`
+      : `<div class="hc-name">${h.name}</div>`;
     card.insertBefore(Sprites.portrait(i, 96), card.firstChild);
     card.addEventListener('pointerdown', () => {
       if (locked) {
         Sound.sfx.uiBack();
-        showModal(`${h.name} is caged`, un ? `Unlock by: <b>${un.desc}</b>` : 'Keep playing to unlock.', [{ label: 'OK', primary: true }]);
+        showModal(`${h.name} is caged`,
+          (un ? `Free them as a starting pick by: <b>${un.desc}</b><br><br>` : '') +
+          `You can still play ${h.name} right now — they are caged somewhere on the island in every run. Break the cage and possess them.`,
+          [{ label: 'OK', primary: true }]);
         return;
       }
       selectedHero = i;
@@ -5596,7 +5652,7 @@ window.__balitopia = {
   relics: () => relics, chests: () => chests, pools: () => pools,
   addRelic, tryDash, tryPowershot, spawnElite, fireBeat, spawnChest, openChest,
   cycleFormation, showMutatorDraft, showChest, computeScore, effWeapon, bodyY,
-  loadSave, saveGame, flushSave, nextGoals, runContext, checkUnlocks, isUnlocked,
+  loadSave, saveGame, flushSave, nextGoals, runContext, checkUnlocks, isUnlocked, battleTrack,
   applyQuality, coach, showModal, allyFalloff,
   getQL: () => QL, viewInfo: () => ({ w: Math.round(viewW), h: Math.round(viewH), mul: +viewMul.toFixed(3) }),
   setQL: q => { QL = q; resize(); },

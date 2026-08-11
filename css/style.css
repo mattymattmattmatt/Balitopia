@@ -208,6 +208,9 @@ html, body {
   .hero-card canvas { max-width:11.5vh; border-radius:5px; }
   .hero-card .hc-name { font-size:7.5px; }
   .hero-card .hc-state { font-size:6.5px; }
+  /* 12 columns leaves ~65px per card; the unlock line still reads at this size
+     once clamped to two lines, so it stays — a tap gives the full text. */
+  .hero-card .hc-req { font-size:6.5px; }
   .select-title { font-size:14px; margin:2px 0 0; letter-spacing:2px; }
   .select-sub { font-size:9px; margin-bottom:3px; padding:0 30px; }
   #hero-detail { margin-top:4px; padding:5px 12px; gap:9px; max-width:560px; }
@@ -718,8 +721,16 @@ body.stick-right #dash-btn { right:auto; left:calc(20px + env(safe-area-inset-le
 #modal-btns { display:flex; gap:10px; justify-content:center; margin-top:16px; flex-wrap:wrap; }
 
 /* ============ Select screen: locks + goals + kit preview ============ */
-.hero-card.locked { opacity:.42; filter:grayscale(.95); }
+/* Locked cards carry their unlock condition, so lift them out of the murk
+   enough to actually read — .42 opacity on grayscale made the text illegible. */
+.hero-card.locked { opacity:.72; filter:grayscale(.7); }
 .hero-card.locked .hc-name { color:#9fd6c9; }
+.hero-card.locked canvas { opacity:.5; }
+.hero-card .hc-req {
+  font-size:7.5px; line-height:1.15; color:#ffd54f; margin-top:1px;
+  display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical;
+  overflow:hidden; white-space:normal;
+}
 #select-count { font-size:11px; color:#80cbc4; letter-spacing:2px; vertical-align:middle; }
 #select-goals { display:flex; gap:8px; flex-wrap:wrap; justify-content:center; margin:4px 0 2px; padding:0 12px; }
 #select-goals .sg { font-size:9.5px; color:#9fd6c9; background:rgba(255,255,255,.05);
