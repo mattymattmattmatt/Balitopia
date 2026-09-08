@@ -13,6 +13,7 @@
 <link rel="apple-touch-icon" href="assets/img/icon-192.png">
 <link rel="manifest" href="manifest.json">
 <link rel="stylesheet" href="css/style.css">
+<link rel="stylesheet" href="css/studio.css">
 </head>
 <body>
 
@@ -26,10 +27,14 @@
     <div id="hud-meta">
       <span id="soul-pips" title="Soul — spent on possession">✦✦✦</span>
       <span id="relic-hud"></span>
+      <span id="rally-hud" class="hidden">RALLY</span>
     </div>
   </div>
   <div id="hud-top-center">
+    <div id="run-phase">EXPEDITION · ASSEMBLE</div>
     <div id="timer">0:00</div>
+    <div id="run-track"><i id="run-track-fill"></i></div>
+    <div id="run-objective"></div>
     <div id="boss-eta" class="hidden"></div>
     <div id="boss-hp-wrap" class="hidden">
       <div id="boss-hp-bar"></div><span>KING GLOB</span>
@@ -48,31 +53,43 @@
     <button id="btn-mute" aria-label="Toggle sound">♪</button>
   </div>
   <div id="facecard-strip"></div>
-  <button id="dash-btn" aria-label="Dash"><span>⟫</span><i id="dash-fill"></i></button>
-  <button id="ps-btn" aria-label="Powershot"><span>⚡</span><i id="ps-fill"></i></button>
+  <button id="dash-btn" aria-label="Dash"><span>⟫</span><i id="dash-fill"></i><small>DASH</small></button>
+  <button id="ps-btn" aria-label="Powershot"><span>ϟ</span><i id="ps-fill"></i><small>POWER</small></button>
   <div id="banner" class="hidden"></div>
   <div id="coach" class="hidden"></div>
 </div>
 
 <!-- ===== Title (VS key art + menu) ===== -->
 <div id="screen-title" class="screen">
-  <div id="title-logo">
-    <h1>BALITOPIA</h1>
-    <h2>Guardians of the Broken Cages</h2>
-  </div>
-  <nav id="title-menu">
-    <button class="menu-btn" id="btn-menu-start">START</button>
-    <button class="menu-btn hidden" id="btn-menu-continue">CONTINUE</button>
-    <button class="menu-btn" id="btn-menu-daily">☀ DAILY CHALLENGE</button>
-    <button class="menu-btn" id="btn-menu-shop">🐚 SHELL SHRINE</button>
-    <button class="menu-btn" id="btn-menu-records">RECORDS</button>
-    <div id="title-sub-btns">
-      <button class="menu-btn small" id="btn-menu-howto">HOW TO PLAY</button>
-      <button class="menu-btn small" id="btn-menu-seed">🔗 SEED</button>
-      <button class="menu-btn small" id="btn-menu-settings">⚙ SETTINGS</button>
+  <header class="home-top"><span class="island-mark">B / 24</span><span>GUARDIANS OF THE BROKEN CAGES</span><div id="home-wallet" aria-label="Shell balance">0 shells</div></header>
+  <div class="home-layout">
+    <div class="home-main">
+      <div id="title-logo"><p class="eyebrow">THE ISLAND NEEDS YOU</p><h1>BALITOPIA</h1><h2>One Guardian. A whole lot of trouble.</h2></div>
+      <p class="home-premise">Break the cages. Build your squad.<br>Take back the island.</p>
+      <nav id="title-menu" aria-label="Main menu">
+        <button class="menu-btn primary-play" id="btn-menu-start"><span>PLAY</span><small>Choose your expedition</small><i aria-hidden="true">›</i></button>
+        <button class="menu-btn hidden quick-play" id="btn-menu-continue">QUICK PLAY <span>Last loadout ↗</span></button>
+        <div class="home-actions">
+          <button class="menu-btn" id="btn-menu-daily"><b>☀</b><span>Daily challenge<small id="home-daily">One island. One shared challenge.</small></span></button>
+          <button class="menu-btn" id="btn-menu-shop"><b>◈</b><span>Shell shrine<small>Grow between expeditions</small></span></button>
+          <button class="menu-btn" id="btn-menu-records"><b>♜</b><span>Records<small>Your Guardians &amp; best runs</small></span></button>
+        </div>
+      </nav>
     </div>
-  </nav>
-  <p class="hint" id="title-hint">tap ⚙ for volume &amp; accessibility · best in landscape</p>
+    <aside class="home-feature" aria-label="Guardian spotlight">
+      <div class="spotlight-label"><span>24 GUARDIANS</span><span>ONE ISLAND</span></div>
+      <img class="spotlight-hero" src="assets/img/heroes/waterwolf.png" alt="Waterwolf, the tidal Guardian" fetchpriority="high">
+      <div class="spotlight-caption"><span class="eyebrow">EVERY RESCUE CHANGES YOUR BUILD</span><strong>Stronger together.</strong><p>Every Guardian you free joins the fight.</p></div>
+      <div class="home-progress" id="home-progress"></div>
+    </aside>
+  </div>
+  <footer id="title-sub-btns">
+    <button class="menu-btn small" id="btn-menu-howto">HOW TO PLAY</button>
+    <button class="menu-btn small" id="btn-menu-story">THE STORY</button>
+    <button class="menu-btn small" id="btn-menu-seed">PLAY A SEED</button>
+    <button class="menu-btn small" id="btn-menu-settings">SETTINGS</button>
+    <span id="title-hint">DRAG TO MOVE · AUTO ATTACK</span>
+  </footer>
 </div>
 
 <!-- ===== Settings ===== -->
@@ -150,23 +167,23 @@
 
 <!-- ===== Hero Select ===== -->
 <div id="screen-select" class="screen hidden">
-  <button class="back-btn" id="btn-select-back">‹ BACK</button>
-  <h2 class="select-title">CHOOSE YOUR GUARDIAN <span id="select-count"></span></h2>
-  <p class="select-sub">🔒 cards are locked as a <b>starting</b> pick only — every one of the 24 is caged on the island in every run. Break them free and they fight beside you, and their bodies are yours to possess.</p>
-  <div id="hero-grid"></div>
-  <div id="select-goals"></div>
-  <div id="hero-detail" class="hidden">
-    <div id="hero-detail-portrait"></div>
-    <div id="hero-detail-text">
-      <h3 id="hero-detail-name"></h3>
-      <p id="hero-detail-power"></p>
-      <p id="hero-detail-desc"></p>
-    </div>
-    <div id="detail-right">
-      <div id="diff-select" aria-label="difficulty"></div>
-      <button class="big-btn" id="btn-start">FIGHT!</button>
-    </div>
+  <header class="select-header"><button class="back-btn" id="btn-select-back">‹ HOME</button><h2 class="select-title">PICK YOUR GUARDIAN</h2><span id="select-count"></span></header>
+  <div class="select-workspace">
+    <section class="guardian-roster"><p class="select-sub">Choose a starter. Rescue the others on the island.</p><div id="hero-grid" aria-label="Guardian selection"></div></section>
+    <section id="hero-detail" class="hidden" aria-label="Selected Guardian">
+      <div id="hero-detail-portrait"></div>
+      <div id="hero-detail-text"><h3 id="hero-detail-name"></h3><p id="hero-detail-power"></p><p id="hero-detail-desc"></p></div>
+      <div id="detail-right"><div id="diff-select" aria-label="Difficulty"></div></div>
+    </section>
   </div>
+  <div id="select-goals"></div>
+  <div class="expedition-launch">
+    <label>RUN<select id="run-mode" aria-label="Run mode"></select></label>
+    <label>ISLAND<select id="run-route" aria-label="Island route"></select></label>
+    <label>BLESSING<select id="run-blessing" aria-label="Starting blessing"></select></label>
+    <button class="big-btn" id="btn-start">LET'S GO ›</button>
+  </div>
+  <p id="run-setup-copy"></p>
 </div>
 
 <!-- ===== Records (leaderboard + codex) ===== -->
@@ -180,6 +197,7 @@
 <div id="screen-roster" class="screen hidden">
   <h2 class="select-title">GUARDIANS</h2>
   <p class="select-sub">Tap a freed Guardian to possess them — costs ✦ Soul, grants a 3s Soulburn</p>
+  <div id="run-contracts"></div>
   <div id="roster-build"></div>
   <div id="roster-grid"></div>
   <div id="roster-btns">
@@ -191,7 +209,7 @@
 
 <!-- ===== Level Up ===== -->
 <div id="screen-levelup" class="screen hidden">
-  <h2 class="select-title">LEVEL UP!</h2>
+  <p class="eyebrow">MAKE THIS BUILD YOURS</p><h2 class="select-title">CHOOSE YOUR NEXT POWER</h2><p id="draft-subtitle"></p>
   <div id="upgrade-row"></div>
   <div id="lu-build" class="build-strip"></div>
   <div id="levelup-ctrls">
@@ -230,6 +248,7 @@
       <h1 id="over-title"></h1>
       <div id="over-diff"></div>
     </div>
+    <div id="expedition-recap"></div>
     <div id="over-flavor"></div>
     <div id="over-score"></div>
     <div id="over-summary"></div>
@@ -237,7 +256,8 @@
     <div class="over-sec-label">GUARDIAN PERFORMANCE</div>
     <div id="over-heroes"></div>
     <div id="over-btns">
-      <button class="big-btn" id="btn-retry">PLAY AGAIN</button>
+      <button class="big-btn" id="btn-retry">RUN IT BACK ›</button>
+      <button class="menu-btn2" id="btn-change-guardian">CHANGE GUARDIAN</button>
       <button class="menu-btn2" id="btn-over-share">📸 SHARE</button>
       <button class="menu-btn2" id="btn-over-records">RECORDS</button>
       <button class="menu-btn2" id="btn-over-menu">MENU</button>
@@ -251,6 +271,7 @@
 <script src="js/data.js"></script>
 <script src="js/sprites.js"></script>
 <script src="js/audio.js"></script>
+<script src="js/expedition.js"></script>
 <script src="js/game.js"></script>
 </body>
 </html>

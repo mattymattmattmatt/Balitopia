@@ -1,15 +1,21 @@
-# Browser test harness
+# Tests
+
+`npm test` runs the dependency-free expedition rules and game-simulation regression suite. It loads the real `data.js`, `expedition.js` and `game.js` inside a deterministic Node VM with no-op DOM, canvas and audio ports. This checks mechanics, save migration, UI event wiring, reward races and all 24 Guardian weapon paths. It does **not** render pixels, measure phone frame rates, or validate browser touch behaviour.
+
+## Browser regression and performance tests
+
+The original browser suites remain available separately:
 
 Both scripts drive the real page in headless Chromium against a local server,
 so start one first:
 
 ```bash
 python3 -m http.server 8811     # from the repo root
-npm test                        # correctness checks
+npm run test:browser            # browser correctness checks
 npm run bench                   # frame-rate comparison across quality presets
 ```
 
-`npm test` asserts the things that have actually broken before: every quality
+`npm run test:browser` asserts the things that have actually broken before: every quality
 preset applies without throwing, the camera widens as the roster grows, the
 field music rotates per Glob kill without moving the biome, the performance
 preset's enemy cap holds, and the Guardian unlock cascade still fires.
@@ -24,9 +30,9 @@ harness was being written:
 - **Pin the quality preset.** With `prefs.quality` on `auto`, the adaptive
   ladder climbs back up mid-measurement on a fast machine and takes
   `maxEnemies` with it. Set `B.prefs().quality` before measuring.
-- **`spawnEnemy` bypasses the cap.** The limiter lives in `spawnWave`, so
-  injecting entities directly measures an uncapped field. Spawn at most
-  `getQL().maxEnemies` to model what a player actually meets.
+- **Every spawn path now observes the cap.** `spawnEnemy` enforces the selected quality preset for normal waves and scripted encounters.
 
 Run-to-run variance is roughly ±3 fps, so the scripts take a median of three
 and single-digit differences between presets should not be read as signal.
+
+Install the existing Playwright dependency and its Chromium browser before running these browser suites. They use Playwright’s installed Chromium by default; set `CHROMIUM_PATH` only to use a custom browser executable.
