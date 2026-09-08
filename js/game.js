@@ -90,9 +90,10 @@ window.addEventListener('keydown', e => {
   keys[e.code] = true;
   // only own the keys during a run — menus keep normal keyboard behaviour
   if (e.code === 'Space' && G.running) { e.preventDefault(); powershot(); }
+  if ((e.code === 'ShiftLeft' || e.code === 'ShiftRight') && G.running) { e.preventDefault(); tryDash(); }
   if ((e.code === 'Escape' || e.code === 'KeyP') && inRun()) {
     e.preventDefault();
-    if ($('screen-levelup').classList.contains('hidden')) {
+    if (!overlayOpen() && $('screen-modal').classList.contains('hidden')) {
       if ($('screen-roster').classList.contains('hidden')) openRoster();
       else closeRoster();
     }
@@ -411,6 +412,10 @@ const roundDmgMul  = () => conv(ROUND_EDMG, 0.85, G.round || 1);
 const roundBossMul = () => conv(ROUND_BHP, 0.85, G.round || 1);
 
 function spawnEnemy(type, tier, x, y, elite) {
+  // The same budget applies to scripted surges, elites and ordinary waves.
+  // Counting here prevents event bursts from bypassing the mobile preset.
+  let alive = 0;
+  for (const e of enemies) if (e.alive && ++alive >= (QL.maxEnemies || MAX_ENEMIES)) return null;
   let e = null;
   for (let i = 0; i < MAX_ENEMIES; i++) if (!enemies[i].alive) { e = enemies[i]; e.id = i; break; }
   if (!e) return null;
@@ -465,7 +470,7 @@ function spawnElite() {
 const clampW = v => Math.min(WORLD - 30, Math.max(30, v));
 
 function spawnWave(dt) {
-  const t = G.time;
+  const t = encounterTime();
   // Opens at 2.4/sec, not 1.4 — the first 45 seconds used to be an empty field,
   // which is the exact window that decides whether a player takes a second run.
   // (3.5 was over-corrected: soak testing had a passive player dying at 0:21 on
@@ -815,6 +820,7 @@ function damageBoss(dmg, o) {
 // Endless mode: killing King Glob rolls the run into the next round.
 // Enemies get tougher, and he crawls back out of the mountain even angrier.
 function killBoss(b) {
+  if (!b || !b.alive || G.over) return;
   b.alive = false;
   G.bossKills++;
   G.shake = 18;
@@ -826,6 +832,13 @@ function killBoss(b) {
   Sound.playFile('assets/audio/enemies/glob_defeat.wav', 1);
   setTimeout(() => Sound.playFile('assets/audio/sfx/crown_crack.wav', 0.9), 900);
   G.boss = null;
+  if (G.session && G.session.mode !== 'endless' && !G.daily) {
+    G.session.extracted = true;
+    G.healPct(0.5);
+    $('boss-hp-wrap').classList.add('hidden');
+    endGame();
+    return;
+  }
   G.round++;
   G.nextBossAt = G.time + BOSS_RESPAWN - (G.mut.bossEarly || 0);
   G.bossWarned = false;
@@ -865,6 +878,7 @@ function damageCage(c, dmg) {
 }
 
 function breakCage(c) {
+  if (!c || c.broken || G.over) return;
   c.broken = true;
   const ally = makeFighter(c.heroIdx, c.x, c.y);
   allies.push(ally);
@@ -874,7 +888,18 @@ function breakCage(c) {
   Sound.sfx.cageBreak();
   Sound.playFile(`assets/audio/heroes/${HEROES[c.heroIdx].id}_entrance.wav`, 0.9);
   G.healPct(0.25);
-  banner(`${HEROES[c.heroIdx].name.toUpperCase()} JOINED THE FIGHT!`);
+  if (G.session) {
+    G.session.rescues++;
+    G.soul = Math.min(SOUL_MAX, G.soul + 1);
+    heroState[c.heroIdx].charge = Math.max(heroState[c.heroIdx].charge, 0.65);
+    if (G.session.rescues % 3 === 0) {
+      G.session.rally = 8;
+      for (const hs of heroState) hs.charge = Math.min(1, hs.charge + 0.35);
+    }
+  }
+  banner(G.session && G.session.rescues % 3 === 0
+    ? `${HEROES[c.heroIdx].name.toUpperCase()} · SQUAD RALLY! +30% DAMAGE FOR 8s`
+    : `${HEROES[c.heroIdx].name.toUpperCase()} JOINED THE FIGHT!`);
   rebuildStrip();
   updateHudCounts();
 }
@@ -973,7 +998,8 @@ function fireWeapon(f, w, ws, isAlly, dt) {
   const rateMul = m.rate * (isAlly ? 1.25 * (G.mut.allyRate || 1) : 1) * hm.rate
     * (G.comboRateMul && !isAlly ? G.comboRateMul : 1) * (f.frenzy ? 1 / (1 + f.frenzy * 0.06) : 1);
   const dmgMul = m.dmg * (isAlly ? allyFalloff() * m.ally : 1) * heroDmgMul(src) * hm.dmg
-    * (evo && w.type === 'aura' ? 1.35 : 1) * (f.ghost ? f.ghostMul : 1);
+    * (evo && w.type === 'aura' ? 1.35 : 1) * (f.ghost ? f.ghostMul : 1) * (f.mul || 1)
+    * (G.session && G.session.rally > 0 ? 1.3 : 1);
   const areaMul = E.areaMul;
   const eCount = E.count, ePierce = E.pierce, eSpeedMul = E.speedMul;
   const eJumps = E.jumps, eExplodeMul = E.explodeMul, eArcAdd = E.arc - (w.arc || 0);
@@ -1797,37 +1823,37 @@ function addRelic(defId) {
 }
 function updateRelics(dt) {
   for (const r of relics) {
-    const w = r.def.w, lv = r.lv;
-    const dmgMul = G.mods.dmg * (1 + (lv - 1) * 0.35) * (r.def.id === 'spire' ? 1 : 1);
+    const w = r.def.w, lv = r.lv, evolved = !!r.evolved;
+    const dmgMul = G.mods.dmg * (1 + (lv - 1) * 0.35) * (evolved && r.def.id === 'blossom' ? 1.4 : 1);
     const areaMul = G.mods.area * (lv >= 2 ? 1.4 : 1);
     r.cd -= dt;
     switch (w.type) {
       case 'totem':
         if (r.cd <= 0) {
           r.cd = w.interval * G.mods.rate;
-          const n = lv >= 4 ? 2 : 1;
+          const n = evolved ? 3 : lv >= 4 ? 2 : 1;
           for (let i = 0; i < n; i++)
             totems.push({ x: player.x + (Math.random() - 0.5) * 60, y: player.y + (Math.random() - 0.5) * 60,
-              r: w.radius * areaMul, dmg: w.dmg * dmgMul, life: w.life, pulse: 0, every: w.pulse, slow: lv >= 3 ? 1.5 : 0 });
+              r: w.radius * areaMul, dmg: w.dmg * dmgMul, life: w.life, pulse: 0, every: w.pulse * (evolved ? 0.65 : 1), slow: lv >= 3 ? 1.5 : 0 });
         }
         break;
       case 'mine':
         if (r.cd <= 0) {
           r.cd = w.interval * G.mods.rate * (lv >= 3 ? 0.7 : 1);
-          const n = lv >= 4 ? 2 : 1;
+          const n = evolved ? 3 : lv >= 4 ? 2 : 1;
           for (let i = 0; i < n; i++)
             pools.push({ mine: 1, x: player.x + (Math.random() - 0.5) * 40, y: player.y + (Math.random() - 0.5) * 40,
-              r: w.radius * (lv >= 2 ? 1.5 : 1), dmg: w.dmg * dmgMul, life: w.life, arm: lv >= 3 ? 0.4 : 0.9, color: w.color });
+              r: w.radius * (lv >= 2 ? 1.5 : 1) * (evolved ? 1.4 : 1), dmg: w.dmg * dmgMul, life: w.life, arm: lv >= 3 ? 0.4 : 0.9, color: w.color });
         }
         break;
       case 'sweep': {
         r.ang += w.rot * dt;
-        const beams = lv >= 3 ? 2 : 1, L = w.length * (lv >= 2 ? 1.45 : 1) * G.mods.area;
+        const beams = evolved ? 3 : lv >= 3 ? 2 : 1, L = w.length * (lv >= 2 ? 1.45 : 1) * G.mods.area * (evolved ? 1.25 : 1);
         r.tick = (r.tick || 0) - dt;
         if (r.tick <= 0) {
           r.tick = 0.12;
           for (let b = 0; b < beams; b++) {
-            const a = r.ang + b * Math.PI, dx = Math.cos(a), dy = Math.sin(a);
+            const a = r.ang + b * Math.PI * 2 / beams, dx = Math.cos(a), dy = Math.sin(a);
             eachEnemyNear(player.x + dx * L / 2, player.y + dy * L / 2, L / 2 + 50, e => {
               const px = e.x - player.x, py = bodyY(e) - player.y;
               const along = px * dx + py * dy;
@@ -1846,7 +1872,7 @@ function updateRelics(dt) {
           r.cd = w.interval * G.mods.rate;
           const [mx2, my2] = moveVector();
           const a = (mx2 || my2) ? Math.atan2(my2, mx2) : (r.ang += 1.1);
-          const R = w.radius * (lv >= 2 ? 1.4 : 1) * G.mods.area, half = w.arc / 2;
+          const R = w.radius * (lv >= 2 ? 1.4 : 1) * G.mods.area * (evolved ? 1.5 : 1), half = w.arc / 2;
           eachEnemyNear(player.x, player.y, R + 40, e => {
             const by = bodyY(e);
             if ((e.x - player.x) ** 2 + (by - player.y) ** 2 > R * R) return;
@@ -1857,7 +1883,7 @@ function updateRelics(dt) {
             const pull = w.pull * (lv >= 3 ? 1.6 : 1);
             e.kbx -= (e.x - player.x) / d * pull; e.kby -= (e.y - player.y) / d * pull;
             e.slowT = Math.max(e.slowT, w.slow);
-            if (lv >= 4) damageEnemy(e, w.dmg * dmgMul, { src: player.heroIdx, fromX: player.x, fromY: player.y });
+            if (lv >= 4) damageEnemy(e, w.dmg * dmgMul * (evolved ? 2 : 1), { src: player.heroIdx, fromX: player.x, fromY: player.y });
           });
           effects.push({ type: 'cone', x: player.x, y: player.y, ang: a, r: R, arc: w.arc, t: 0, dur: 0.3, color: w.color });
           Sound.sfx.weapon('nova');
@@ -1866,7 +1892,7 @@ function updateRelics(dt) {
       case 'bolt':
         if (r.cd <= 0) {
           r.cd = w.interval * G.mods.rate;
-          const strikes = lv >= 3 ? 2 : 1;
+          const strikes = evolved ? 4 : lv >= 3 ? 2 : 1;
           for (let s = 0; s < strikes; s++) {
             const t = nearestTarget(player.x + (Math.random() - 0.5) * 200, player.y + (Math.random() - 0.5) * 200, w.range, false);
             if (!t) break;
@@ -1883,7 +1909,7 @@ function updateRelics(dt) {
         break;
       case 'petal': {
         r.ang += w.rot * dt;
-        const cnt = w.count + (lv >= 2 ? 1 : 0), R = w.radius * G.mods.area;
+        const cnt = w.count + (lv >= 2 ? 1 : 0) + (evolved ? 2 : 0), R = w.radius * G.mods.area;
         r.cds = r.cds || [];
         for (let i = 0; i < cnt; i++) {
           r.cds[i] = (r.cds[i] || 0) - dt;
@@ -1910,17 +1936,17 @@ function updateRelics(dt) {
       case 'spire':
         if (r.cd <= 0) {
           r.cd = w.interval * G.mods.rate;
-          if (spires.length < (lv >= 4 ? 2 : 1) + 1)
+          if (spires.length < (evolved ? 3 : lv >= 4 ? 2 : 1))
             spires.push({ x: player.x, y: player.y, life: w.life * (lv >= 3 ? 1.7 : 1),
-              heroIdx: player.heroIdx, ws: makeWS(player.heroIdx), mul: w.dmg * (lv >= 2 ? 1.35 : 1) });
+              heroIdx: player.heroIdx, ws: makeWS(player.heroIdx), mul: w.dmg * (lv >= 2 ? 1.35 : 1) * (evolved ? 1.35 : 1) });
         }
         break;
       case 'ghost':
-        if (ghosts.length < (lv >= 4 ? 2 : 1)) {
-          for (let i = ghosts.length; i < (lv >= 4 ? 2 : 1); i++)
-            ghosts.push({ x: player.x, y: player.y, off: i * 3.14, ghost: 1, ghostMul: w.mirror + (lv >= 2 ? 0.2 : 0), fx: 1, bob: 0 });
+        if (ghosts.length < (evolved ? 3 : lv >= 4 ? 2 : 1)) {
+          for (let i = ghosts.length; i < (evolved ? 3 : lv >= 4 ? 2 : 1); i++)
+            ghosts.push({ x: player.x, y: player.y, off: i * 3.14, ghost: 1, ghostMul: (evolved ? 0.85 : w.mirror + (lv >= 2 ? 0.2 : 0)), fx: 1, bob: 0 });
         }
-        for (const g of ghosts) g.ghostMul = w.mirror + (lv >= 2 ? 0.2 : 0);
+        for (const g of ghosts) g.ghostMul = (evolved ? 0.85 : w.mirror + (lv >= 2 ? 0.2 : 0));
         break;
     }
   }
@@ -1998,7 +2024,7 @@ function tickSoul(dt) {
 // ================================================================
 function runActBeats() {
   for (const b of ACT_BEATS) {
-    if (G.beats[b.t] || G.time < b.t) continue;
+    if (G.beats[b.t] || encounterTime() < b.t) continue;
     G.beats[b.t] = 1;
     fireBeat(b.k);
   }
@@ -2106,7 +2132,7 @@ function tickCombo(dt) {
 
 // ---------------- Pickups / patches / effects ----------------
 function updatePickups(dt) {
-  const magR = 92 * G.mods.magnet;
+  const magR = G.session && G.session.rally > 0 ? 650 : 92 * G.mods.magnet;
   for (const g of gems) {
     if (!g.alive) continue;
     g.t += dt;
@@ -2344,6 +2370,7 @@ function update(dt) {
   pStart('update');
   G.time += dt;
   G.frameN++;
+  updateExpedition(dt);
   const m = G.mods;
 
   // player move
@@ -2387,6 +2414,7 @@ function update(dt) {
   updateTide(dt);
   spawnWave(dt);
   updateEnemies(dt);
+  if (G.over) { pEnd(); return; }
 
   // player weapons
   const hero = HEROES[player.heroIdx];
@@ -2396,8 +2424,10 @@ function update(dt) {
   updateRelics(dt);
   updateAllies(dt);
   updateProjs(dt);
+  if (G.over) { pEnd(); return; }
   updatePowerWaves(dt);
   updateBoss(dt);
+  if (G.over) { pEnd(); return; }
   updateMirror(dt);
   updateEbullets(dt);
   updateChests(dt);
@@ -2872,7 +2902,7 @@ function render(dt) {
     if (r.def.w.type === 'sweep' && r.L) {
       const col = r.def.w.color;
       for (let b = 0; b < r.beams; b++) {
-        const a = r.ang + b * Math.PI;
+        const a = r.ang + b * Math.PI * 2 / r.beams;
         const ex = player.x + Math.cos(a) * r.L, ey = player.y + Math.sin(a) * r.L;
         ctx.lineCap = 'round';
         ctx.strokeStyle = col; ctx.globalAlpha = 0.2; ctx.lineWidth = 26;
@@ -3609,6 +3639,7 @@ function updateHud(dt) {
   hudTick -= dt;
   if (hudTick > 0) return;
   hudTick = 0.12;
+  updateExpeditionHud();
   setHud('hp-bar', 'w', Math.round(Math.max(0, player.hp / maxHP() * 100)) + '%');
   setHud('hp-text', 't', `${Math.ceil(player.hp)} / ${maxHP()}`);
   setHud('xp-bar', 'w', Math.round(Math.min(100, G.xp / G.xpNext * 100)) + '%');
@@ -3650,7 +3681,7 @@ function updateHud(dt) {
 function renderRelicHud() {
   const el = $('relic-hud');
   if (!el) return;
-  el.innerHTML = relics.map(r => `<span class="rh" title="${r.def.name}">${r.def.icon}<b>${r.lv}</b></span>`).join('');
+  el.innerHTML = relics.map(r => `<span class="rh${r.evolved ? ' evolved' : ''}" title="${r.evolved ? r.evolved.name : r.def.name}">${r.def.icon}<b>${r.evolved ? '★' : r.lv}</b></span>`).join('');
 }
 function updateHudCounts() {
   $('freed').textContent = `⛓ ${freedSet.size}/24`;
@@ -3863,6 +3894,7 @@ function powershot() {
   const idx = player.heroIdx, hs = heroState[idx];
   if (!hs || hs.charge < 1) return false;
   hs.charge = 0;
+  if (G.session) G.session.powershots++;
   G.psKills = 0;
   const hero = HEROES[idx];
   const w = hero.weapons[0];
@@ -3987,18 +4019,29 @@ function levelUpPool() {
 }
 // ---------------- Level up: 3 face-down mystery cards ----------------
 function rollLevelUpCards(n) {
-  const pool = levelUpPool();
-  const chosen = [], seen = new Set();
-  let guard = 400;
-  while (chosen.length < n && pool.length && guard-- > 0) {
-    const pick = pool.splice((Math.random() * pool.length) | 0, 1)[0];
-    if (seen.has(pick.id)) continue;   // don't offer the same card twice (double-weighting can dup)
-    seen.add(pick.id); chosen.push(pick);
+  let pool = levelUpPool();
+  const chosen = [];
+  const draw = filter => {
+    const candidates = pool.filter(filter);
+    if (!candidates.length) return;
+    const rng = G.rng || Math.random;
+    const pick = candidates[Math.floor(rng() * candidates.length)];
+    chosen.push(pick); pool = pool.filter(c => c.id !== pick.id);
+  };
+  // Every full draft offers a build direction, a Guardian identity and a
+  // supporting power. Small chest draws retain the full weighted pool.
+  if (n >= 3) {
+    draw(c => c.relic);
+    draw(c => c.hero === player.heroIdx);
+    const keys = relics.filter(r => !r.evolved && r.lv >= 2).map(r => Expedition.recipe(r.def.id).upgrade);
+    draw(c => !c.relic && c.hero === undefined && (!keys.length || keys.includes(c.id)));
   }
+  while (chosen.length < n && pool.length) draw(() => true);
   return chosen;
 }
 function closeLevelUp() {
-  G.pendingLv--;
+  G.pendingLv = Math.max(0, G.pendingLv - 1);
+  G.draftBusy = false;
   $('screen-levelup').classList.add('hidden');
   if (G.pendingLv > 0) { showLevelUp(); return; }
   overlayClosed();
@@ -4010,55 +4053,42 @@ function closeLevelUp() {
 // invisible at the moment of choosing. The flip is now an ENTRANCE, not a
 // concealment: cards deal in and auto-reveal in a stagger, then wait for input.
 function showLevelUp() {
-  G.running = false;
+  if (G.over) return;
+  G.running = false; G.draftBusy = false;
+  const draftId = G.draftId = (G.draftId || 0) + 1;
+  const token = G.runToken;
   const row = $('upgrade-row');
-  const nCards = 3 + (loadSave().deep && loadSave().deep.charm ? 1 : 0);
+  const nCards = 3 + (!G.daily && loadSave().deep && loadSave().deep.charm ? 1 : 0);
   const chosen = rollLevelUpCards(nCards);
-  let picked = false;
-  const renderCards = cards => {
-    row.innerHTML = '';
-    cards.forEach((pick, i) => {
-      const card = document.createElement('div');
-      const kind = pick.relic ? ' relic' : pick.hero !== undefined ? ' signature' : '';
-      card.className = 'upgrade-card mystery' + kind;
-      card.innerHTML =
-        `<div class="mc-inner">
-           <div class="mc-face mc-front"><span>?</span></div>
-           <div class="mc-face mc-back">
-             ${pick.relic ? `<div class="mc-sig">${pick.newRelic ? 'NEW RELIC' : 'RELIC'}</div>`
-               : pick.hero !== undefined ? '<div class="mc-sig">SIGNATURE</div>' : ''}
-             <div class="uc-icon">${pick.icon}</div><h3>${pick.name}</h3><p>${pick.desc}</p>
-           </div>
-         </div>`;
-      // auto-reveal, staggered — the flip animation is kept, the hidden
-      // information is not. A card can't be chosen until it has actually
-      // revealed, so a fast tap during the cascade can't blind-pick.
-      let ready = false;
-      setTimeout(() => { card.classList.add('flipped'); ready = true; }, 90 + i * 110);
-      const choose = () => {
-        if (picked || !ready) return;
-        picked = true;
-        Sound.sfx.uiClick(); buzz(HAPTIC.level);
-        card.classList.add('chosen');
-        row.querySelectorAll('.upgrade-card').forEach(c => { if (c !== card) c.classList.add('faded'); });
-        if (pick.once || pick.relic) G.mods.taken[pick.id] = true;
-        pick.apply(G.mods, G);
-        if (!pick.relic && pick.hero === undefined) G.upTaken[pick.id] = (G.upTaken[pick.id] || 0) + 1;
-        // rule-changer flags the sim reads directly
-        if (pick.id === 'plague') G.plagueOn = 1;
-        refreshBuildStrip();
-        setTimeout(closeLevelUp, 420);
-      };
-      card.addEventListener('pointerdown', choose);
-      row.appendChild(card);
-    });
-  };
-  renderCards(chosen);
+  row.innerHTML = '';
+  $('draft-subtitle').textContent = `LEVEL ${G.level} · Pick one. Every upgrade lasts this run.`;
+  chosen.forEach(pick => {
+    const card = document.createElement('div');
+    card.className = 'upgrade-card mystery flipped' + (pick.relic ? ' relic' : pick.hero !== undefined ? ' signature' : '');
+    card.setAttribute('role', 'button'); card.tabIndex = 0;
+    card.setAttribute('aria-label', `${pick.name}: ${pick.desc}`);
+    card.innerHTML = `<div class="mc-inner"><div class="mc-face mc-back">` +
+      `<div class="mc-sig">${pick.relic ? (pick.newRelic ? 'NEW RELIC' : 'RELIC UPGRADE') : pick.hero !== undefined ? 'GUARDIAN SIGNATURE' : 'SQUAD POWER'}</div>` +
+      `<div class="uc-icon">${pick.icon}</div><h3>${pick.name}</h3><p>${pick.desc}</p>${upgradeHint(pick)}</div></div>`;
+    const choose = () => {
+      if (G.draftBusy || G.draftId !== draftId || G.runToken !== token || G.over) return;
+      G.draftBusy = true;
+      $('btn-lu-reroll').disabled = true; $('btn-lu-skip').disabled = true;
+      Sound.sfx.uiClick(); buzz(HAPTIC.level);
+      card.classList.add('chosen');
+      row.querySelectorAll('.upgrade-card').forEach(c => { if (c !== card) c.classList.add('faded'); });
+      applyUpgrade(pick);
+      setTimeout(() => { if (G.runToken === token && !G.over && G.draftId === draftId) closeLevelUp(); }, prefs.motion ? 220 : 0);
+    };
+    card.addEventListener('click', choose);
+    card.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); choose(); } });
+    row.appendChild(card);
+  });
   refreshBuildStrip();
-  const rerollN = $('lu-reroll-n');
-  const rerollBtn = $('btn-lu-reroll');
-  if (rerollN) rerollN.textContent = '×' + G.rerolls;
-  if (rerollBtn) rerollBtn.classList.toggle('spent', G.rerolls <= 0);
+  $('lu-reroll-n').textContent = '×' + G.rerolls;
+  $('btn-lu-reroll').disabled = G.rerolls <= 0;
+  $('btn-lu-skip').disabled = false;
+  $('btn-lu-reroll').classList.toggle('spent', G.rerolls <= 0);
   $('screen-levelup').classList.remove('hidden');
 }
 
@@ -4106,28 +4136,27 @@ function overlayClosed() {
 // ---------------- Chest reveal ----------------
 // The slot-machine moment the reward curve never had.
 function showChest(n) {
+  if (G.over) return;
   G.running = false;
-  const row = $('chest-row');
-  row.innerHTML = '';
+  const token = G.runToken;
+  const row = $('chest-row'); row.innerHTML = '';
   $('chest-count').textContent = n;
-  const picks = rollLevelUpCards(n);
-  let revealed = 0;
-  picks.forEach((pick, i) => {
-    const card = document.createElement('div');
-    card.className = 'chest-card' + (pick.relic ? ' relic' : pick.hero !== undefined ? ' signature' : '');
-    card.innerHTML = `<div class="uc-icon">${pick.icon}</div><h3>${pick.name}</h3><p>${pick.desc}</p>`;
-    row.appendChild(card);
-    setTimeout(() => {
-      card.classList.add('in');
-      Sound.sfx.chestTick();
-      if (pick.once || pick.relic) G.mods.taken[pick.id] = true;
-      pick.apply(G.mods, G);
-      if (!pick.relic && !pick.hero) G.upTaken[pick.id] = (G.upTaken[pick.id] || 0) + 1;
-      if (++revealed === picks.length) setTimeout(() => $('btn-chest-close').classList.remove('hidden'), 350);
-    }, 260 + i * 420);
-  });
   $('btn-chest-close').classList.add('hidden');
   $('screen-chest').classList.remove('hidden');
+  for (let i = 0; i < n; i++) setTimeout(() => {
+    if (G.over || G.runToken !== token) return;
+    // Rebuild the pool after each reward, so a full relic slot cannot consume
+    // the next reward and a just-acquired relic can be upgraded immediately.
+    const pick = rollLevelUpCards(1)[0];
+    if (pick) {
+      applyUpgrade(pick);
+      const card = document.createElement('div');
+      card.className = 'chest-card in' + (pick.relic ? ' relic' : pick.hero !== undefined ? ' signature' : '');
+      card.innerHTML = `<div class="uc-icon">${pick.icon}</div><h3>${pick.name}</h3><p>${pick.desc}</p>`;
+      row.appendChild(card); Sound.sfx.chestTick();
+    }
+    if (i === n - 1) $('btn-chest-close').classList.remove('hidden');
+  }, (prefs.motion ? 180 : 0) + i * (prefs.motion ? 280 : 0));
 }
 function closeChest() {
   $('screen-chest').classList.add('hidden');
@@ -4167,6 +4196,7 @@ function showMutatorDraft() {
 
 // ---------------- Roster ----------------
 function openRoster() {
+  renderContracts();
   G.running = false;
   const grid = $('roster-grid');
   grid.innerHTML = '';
@@ -4264,7 +4294,7 @@ function seedToInt(str) {
 function promptSeed() {
   Sound.sfx.uiClick();
   showModal('Play a seed',
-    'Enter a 6-character run code to play someone else\'s exact island.<br><input id="seed-input" maxlength="8" placeholder="ABC123" style="margin-top:12px;text-transform:uppercase;font-family:inherit;font-size:20px;letter-spacing:4px;text-align:center;width:180px;padding:8px;border-radius:10px;border:1.5px solid rgba(255,213,79,.6);background:rgba(0,0,0,.4);color:#ffd54f">',
+    'Enter a run code to replay a cage layout. Match the original mode, island and blessing in the next screen.<br><input id="seed-input" maxlength="8" placeholder="ABC123" style="margin-top:12px;text-transform:uppercase;font-family:inherit;font-size:20px;letter-spacing:4px;text-align:center;width:180px;padding:8px;border-radius:10px;border:1.5px solid rgba(255,213,79,.6);background:rgba(0,0,0,.4);color:#ffd54f">',
     [{ label: 'Cancel' }, { label: 'Play it', primary: true, onClick: () => {
       const v = ($('seed-input') && $('seed-input').value || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
       if (v.length >= 3) { pendingSeed = v; goSelect(); }
@@ -4335,6 +4365,19 @@ function resolveDaily(save, ctx) {
 // ---------------- Game flow ----------------
 function newGame(heroIdx, diffIdx, daily) {
   const save = loadSave();
+  G.session = Expedition.create(selectedMode, selectedRoute, selectedBlessing, daily);
+  const sessionMode = Expedition.mode(G.session.mode);
+  G.draftBusy = false; G.runToken = (G.runToken || 0) + 1;
+  clearTimeout(bannerPump); clearTimeout(bannerHide); bannerPump = null; bannerHide = null; bannerNext = 0;
+  $('banner').classList.add('hidden');
+  G.goldCd = 55; G.lastBrink = -99; G.coachOpen = 0; G.trailAcc = 0;
+  G.shellsEarned = 0; G.newAch = []; G.newUnlocks = [];
+  for (const key of Object.keys(hudCache)) delete hudCache[key];
+  hudTick = 0;
+  for (const key of Object.keys(keys)) keys[key] = false;
+  joyMove.active = false; joyMove.id = null; joyMove.dx = 0; joyMove.dy = 0;
+  ['screen-title', 'screen-story', 'screen-roster', 'screen-modal', 'screen-levelup', 'screen-chest', 'screen-mutator'].forEach(id => $(id).classList.add('hidden'));
+  $('coach').classList.add('hidden');
   G.running = true; G.over = false; G.victory = false; G.pendingLv = 0;
   G.time = 0; G.kills = 0; G.level = 1; G.xp = 0; G.xpNext = 16;
   G.spawnAcc = 0; G.boss = null; G.bossWarned = false; G.shake = 0; G.hitStop = 0;
@@ -4362,7 +4405,7 @@ function newGame(heroIdx, diffIdx, daily) {
   G.diff = DIFFICULTIES[Math.max(0, Math.min(DIFFICULTIES.length - 1, diffIdx | 0))];
   G.startHero = heroIdx;
   G.possessedOther = false;
-  G.round = 1; G.bossKills = 0; G.nextBossAt = BOSS_TIME;
+  G.round = 1; G.bossKills = 0; G.nextBossAt = sessionMode.bossAt;
   G.rerolls = 3 + (daily ? 0 : ((save.perks || {}).fortune || 0));
   G.cam.zoom = 1; viewMul = 1; viewMulTarget = 1;
   heroState = HEROES.map(() => ({ dmg: 0, tier: 0, charge: 0, kills: 0, control: 0 }));
@@ -4379,6 +4422,8 @@ function newGame(heroIdx, diffIdx, daily) {
   // permanent Shell Shrine perks (daily challenge ignores them for fairness)
   const perks = daily ? {} : (save.perks || {});
   for (const p of PERKS) { const lv = perks[p.id] || 0; if (lv > 0) p.apply(G.mods, lv); }
+  if (!daily) Expedition.blessing(G.session.blessing).apply(G.mods);
+  G.mods.xpGain *= sessionMode.xp;
   G.headStart = daily ? 0 : (perks.start || 0);
   // Shrine tier 2 — one-time unlocks that change how a run is built
   const deep = daily ? {} : (save.deep || {});
@@ -4460,7 +4505,8 @@ function newGame(heroIdx, diffIdx, daily) {
     saveGame(save);
   } catch (e) {}
   Sound.stopPreview();
-  G.region = daily ? daily.region : ['region-land', 'region-sea', 'region-sky'][(G.rng() * 3) | 0];
+  G.region = daily ? daily.region : 'region-' + G.session.route;
+  G.session.route = G.region.split('-')[1];
   G.biome = G.region.split('-')[1];
   G.musicRot = 0;
   Sound.playMusic(`music/${battleTrack()}.mp3`);
@@ -4471,6 +4517,12 @@ function newGame(heroIdx, diffIdx, daily) {
   refreshBuildStrip();
   updateFormationBtn();
   coachReset();
+  renderContracts();
+  updateExpeditionHud();
+  if (!daily) {
+    save.runSetup = { mode: selectedMode, route: selectedRoute, blessing: selectedBlessing };
+    saveGame(save);
+  }
 }
 
 // ================================================================
@@ -4482,7 +4534,7 @@ const COACH = [
   { id: 'move',    txt: 'DRAG to move · DOUBLE-TAP to DASH', sub: 'the other side of the screen fires your powershot' },
   { id: 'cage',    txt: 'A CAGED GUARDIAN', sub: 'shoot the cage — the gold arrow points to the nearest one' },
   { id: 'ally',    txt: 'TAP THEIR CARD TO BECOME THEM', sub: 'possession costs ✦ Soul and grants a 3s Soulburn' },
-  { id: 'power',   txt: 'POWERSHOT READY ⚡', sub: 'tap the right side of the screen' },
+  { id: 'power',   txt: 'POWERSHOT READY ⚡', sub: 'tap the glowing power button or press Space' },
   { id: 'gold',    txt: 'GOLD MEANS DEADLY', sub: 'enemy colour tells you its power tier' },
   { id: 'elite',   txt: 'AN ELITE', sub: 'tough, but it drops something worth having' },
   { id: 'chest',   txt: 'A CACHE', sub: 'walk into it for several upgrades at once' },
@@ -4505,7 +4557,8 @@ function coach(id) {
   el.classList.remove('hidden');
   slowMo(0.25, 0.9);
   Sound.sfx.uiSelect();
-  setTimeout(() => { el.classList.add('hidden'); G.coachOpen = 0; }, 2400);
+  const token = G.runToken;
+  setTimeout(() => { if (G.runToken === token) { el.classList.add('hidden'); G.coachOpen = 0; } }, 2400);
 }
 function updateFormationBtn() {
   const el = $('formation-btn');
@@ -4544,7 +4597,7 @@ function computeScore() {
     + G.bossKills * 8000
     + G.reefKills * 9000;
   const prestige = 1 + (loadSave().prestige || 0) * 0.25;
-  return Math.round(base * diff.score * (1 + G.mutScore) * prestige);
+  return Math.round(base * diff.score * (1 + G.mutScore) * prestige * Expedition.mode(G.session && G.session.mode).score);
 }
 
 // persist the run into the leaderboard + codex; returns its all-time rank (-1 if off-board)
@@ -4552,11 +4605,14 @@ function saveRun(score) {
   let rank = -1;
   try {
     const save = loadSave();
+    Expedition.complete(G.session, expeditionStats());
     const rec = {
       score, won: G.victory, heroId: HEROES[G.startHero].id, heroName: HEROES[G.startHero].name,
       diff: G.diff.id, kills: G.kills, time: G.time | 0, freed: freedSet.size, level: G.level,
       round: G.round, bossKills: G.bossKills, date: Date.now(),
       seed: G.seed, assist: prefs.assist ? 1 : 0, combo: G.bestCombo,
+      mode: G.daily ? 'daily' : G.session.mode, route: G.session.route,
+      medals: G.session.completed.length, grade: Expedition.grade(G.session, G.victory),
     };
     const records = Array.isArray(save.records) ? save.records : [];
     records.push(rec);
@@ -4583,8 +4639,9 @@ function saveRun(score) {
       while (keys.length > 10) delete save.daily[keys.shift()];
     }
     // shells (meta currency)
-    G.shellsEarned = Math.floor(score / SHELLS_PER_SCORE);
+    G.shellsEarned = Math.floor(score / SHELLS_PER_SCORE) + G.session.bonus + (!G.daily && G.victory ? 60 : 0);
     save.shells = (save.shells || 0) + G.shellsEarned;
+    Expedition.record(save, G.session, G.victory);
     // lifetime stats
     const st = save.stats || (save.stats = { kills: 0, dmg: 0 });
     st.kills += G.kills;
@@ -4666,7 +4723,7 @@ function buildStatsScreen(rank) {
     (G.round > 1 ? `<span class="diff-badge" style="color:#b388ff;border-color:#b388ff">🌀 ROUND ${G.round}</span>` : '');
   const flav = won
     ? (G.bossKills > 1 ? 'The Hungry King kept coming back. You kept ending him.' : 'King Glob is unmade — the Balance holds.')
-    : 'The horde was too many. This time.';
+    : 'Your next rescue is waiting.';
   const newAch = (G.newAch && G.newAch.length)
     ? `<div class="ach-unlocked">${G.newAch.map(a => `<span>🏆 ${a.icon} ${a.name}${a.shells ? ` +🐚${a.shells}` : ''}</span>`).join('')}</div>` : '';
   const newHeroes = (G.newUnlocks && G.newUnlocks.length)
@@ -4675,7 +4732,7 @@ function buildStatsScreen(rank) {
   // player to learn something from it. The old screen never said what killed you.
   const cause = won ? '' : `<div class="death-cause">Killed by <b>${G.lastHurtBy || 'the horde'}</b>` +
     (G.rerolls > 0 ? ` · you finished with <b>${G.rerolls}</b> reroll${G.rerolls > 1 ? 's' : ''} unused` : '') +
-    (!G.possessCount ? ' · <b>you never possessed anyone</b> — swapping is a free heal and a 3s damage window' : '') +
+    (!G.possessCount ? ' · Try swapping Guardians for invulnerability and a damage boost.' : '') +
     (relics.length === 0 ? ' · <b>you took no Relics</b> — they are the biggest damage boost in the draft' : '') +
     '</div>';
   $('over-flavor').innerHTML = flav + cause + newHeroes + newAch;
@@ -4724,6 +4781,7 @@ function buildStatsScreen(rank) {
     wrap.appendChild(row);
   });
   $('over-heroes').scrollTop = 0;
+  renderExpeditionRecap();
 }
 
 // ---------------- Shareable run-recap card ----------------
@@ -4836,7 +4894,8 @@ async function shareRecap() {
 
 function endGame() {
   if (G.over) return;
-  G.over = true;
+  G.over = true; G.running = false;
+  const token = G.runToken;
   // endless: a run always ends in death, but killing Glob at least once counts as a win
   const won = G.victory = G.bossKills > 0;
   Sound.stopMusic(0.6);
@@ -4847,11 +4906,13 @@ function endGame() {
   if (won) Sound.playFile('assets/audio/sfx/captured.mp3', 0.9);
   else Sound.sfx.death();
   setTimeout(() => {
-    if (G.over) Sound.playMusic(won ? 'music/victory.mp3' : 'music/bgm_gameover.mp3', { loop: false, vol: 0.6 });
+    if (G.runToken === token && G.over && !$('screen-over').classList.contains('hidden'))
+      Sound.playMusic(won ? 'music/victory.mp3' : 'music/bgm_gameover.mp3', { loop: false, vol: 0.6 });
   }, won ? 1800 : 1200);
   G.score = computeScore();
   const rank = saveRun(G.score);
   setTimeout(() => {
+    if (G.runToken !== token || !G.over) return;
     G.running = false;
     G.pendingLv = 0;
     overlayQ = [];
@@ -4895,7 +4956,7 @@ function buildRecordsScreen() {
         <span class="rec-rank">${medal[i] || ('#' + (i + 1))}</span>
         <span class="rec-score">${r.score.toLocaleString()}</span>
         <span class="rec-hero">${crowns}${r.heroName}${r.assist ? ' <i class="rec-assist">assist</i>' : ''}</span>
-        <span class="rec-diff" style="color:${d.color}">${d.name}</span>
+        <span class="rec-diff" style="color:${d.color}"><span class="record-mode">${r.mode === 'daily' ? 'Daily' : r.mode ? Expedition.mode(r.mode).name : 'Classic'}</span>${d.name}</span>
         <span class="rec-meta">${fmtTime(r.time)} · ${r.kills}☠ · ${r.freed}/${HEROES.length}${r.seed ? ' · ' + r.seed : ''}</span>
       </div>`;
     });
@@ -5031,7 +5092,7 @@ function buildShop() {
   }
 }
 function openShop() { Sound.ensure(); Sound.sfx.uiClick(); buildShop(); $('screen-shop').classList.remove('hidden'); }
-function closeShop() { Sound.sfx.uiBack(); $('screen-shop').classList.add('hidden'); }
+function closeShop() { Sound.sfx.uiBack(); $('screen-shop').classList.add('hidden'); refreshHome(); }
 
 // ---------------- Settings ----------------
 function bindSettings() {
@@ -5185,7 +5246,7 @@ function openHowto() { Sound.sfx.uiClick(); buildHowto(); $('screen-howto').clas
 function closeHowto() { Sound.sfx.uiBack(); $('screen-howto').classList.add('hidden'); }
 
 // ---------------- Save data (versioned) ----------------
-const SAVE_VERSION = 3;
+const SAVE_VERSION = 4;
 const SAVE_KEY = 'balitopia', SAVE_BAK = 'balitopia_bak';
 let saveCache = null, saveDirty = false, saveTimer = 0;
 
@@ -5231,6 +5292,7 @@ function loadSave() {
     s.__fresh = 1;
   }
   if (!Array.isArray(s.unlocked) || !s.unlocked.length) { s.unlocked = STARTER_HEROES.slice(); s.__fresh = 1; }
+  Expedition.migrate(s);
   saveCache = s;
   // persist the initialised/migrated shape immediately, so the unlock roster
   // exists on disk from the very first visit rather than only after a run
@@ -5327,6 +5389,7 @@ function savePrefs() {
 
 // ---------------- Menus ----------------
 let selectedHero = 0;
+let selectedMode = 'expedition', selectedRoute = 'land', selectedBlessing = 'tide';
 
 function enterApp() {
   Sound.ensure();   // the caller (goStory / goSelect) owns music from here
@@ -5347,7 +5410,7 @@ function showScreen(id, music) {
   if (music === 'title') Sound.playMusic('music/title.mp3');
   else if (music === 'none') { Sound.stopMusic(); Sound.stopPreview(); }
 }
-function goTitle()  { Sound.stopPreview(); $('screen-over').classList.add('hidden'); $('screen-records').classList.add('hidden'); showScreen('screen-title', 'title'); }
+function goTitle()  { Sound.stopPreview(); $('screen-over').classList.add('hidden'); $('screen-records').classList.add('hidden'); refreshHome(); showScreen('screen-title', 'title'); }
 function goStory()  { Sound.stopPreview(); showScreen('screen-story', 'title'); }
 function goSelect() { buildSelect(); showScreen('screen-select', 'none'); }  // quiet for hero previews
 
@@ -5392,15 +5455,20 @@ function buildTitle() {
     $('btn-menu-continue').classList.remove('hidden');
   }
 
-  $('btn-menu-start').addEventListener('click', () => { enterApp(); Sound.sfx.uiClick(); goStory(); });
-  $('btn-menu-continue').addEventListener('click', () => { enterApp(); Sound.sfx.uiClick(); goSelect(); });
+  const setup = save.runSetup || {};
+  selectedMode = Expedition.mode(setup.mode).id;
+  selectedRoute = Expedition.route(setup.route).id;
+  selectedBlessing = Expedition.blessing(setup.blessing).id;
+  $('btn-menu-start').addEventListener('click', () => { enterApp(); Sound.sfx.uiClick(); goSelect(); });
+  $('btn-menu-story').addEventListener('click', () => { enterApp(); Sound.sfx.uiClick(); goStory(); });
+  $('btn-menu-continue').addEventListener('click', () => { enterApp(); Sound.sfx.uiClick(); const s = loadSave(); newGame(s.lastHero || 0, s.lastDiff || 0); });
   $('btn-menu-records').addEventListener('click', () => { enterApp(); openRecords(); });
   $('btn-menu-daily').addEventListener('click', startDaily);
   $('btn-menu-shop').addEventListener('click', openShop);
   $('btn-shop-back').addEventListener('click', closeShop);
   $('btn-story-continue').addEventListener('click', () => { Sound.sfx.uiClick(); goSelect(); });
   $('btn-story-back').addEventListener('click', () => { Sound.sfx.uiBack(); goTitle(); });
-  $('btn-select-back').addEventListener('click', () => { Sound.sfx.uiBack(); goStory(); });
+  $('btn-select-back').addEventListener('click', () => { Sound.sfx.uiBack(); goTitle(); });
   $('btn-records-back').addEventListener('click', closeRecords);
   $('btn-over-records').addEventListener('click', openRecords);
   $('btn-over-share').addEventListener('click', shareRecap);
@@ -5411,6 +5479,8 @@ function buildTitle() {
   $('btn-menu-seed').addEventListener('click', () => { Sound.ensure(); promptSeed(); });
   $('btn-howto-back').addEventListener('click', closeHowto);
   bindSettings();
+  bindExpeditionSetup();
+  refreshHome();
 }
 
 function buildSelect() {
@@ -5420,7 +5490,7 @@ function buildSelect() {
   // ensure the preselected hero is actually available
   if (!isUnlocked(HEROES[selectedHero].id))
     selectedHero = HEROES.findIndex(h => isUnlocked(h.id));
-  HEROES.forEach((h, i) => {
+  HEROES.map((h, i) => ({ h, i })).sort((a, b) => Number(!isUnlocked(a.h.id)) - Number(!isUnlocked(b.h.id))).forEach(({ h, i }) => {
     const locked = !isUnlocked(h.id);
     const card = document.createElement('div');
     card.className = 'hero-card' + (i === selectedHero ? ' selected' : '') + (locked ? ' locked' : '');
@@ -5433,7 +5503,10 @@ function buildSelect() {
       ? `<div class="hc-name">🔒 ${h.name}</div><div class="hc-req">${un ? un.desc : 'Keep playing'}</div>`
       : `<div class="hc-name">${h.name}</div>`;
     card.insertBefore(Sprites.portrait(i, 96), card.firstChild);
-    card.addEventListener('pointerdown', () => {
+    card.setAttribute('role', 'button'); card.tabIndex = 0;
+    card.setAttribute('aria-label', h.name + (locked ? ' — locked starter' : ' — ' + h.title));
+    card.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); card.click(); } });
+    card.addEventListener('click', () => {
       if (locked) {
         Sound.sfx.uiBack();
         showModal(`${h.name} is caged`,
@@ -5460,6 +5533,7 @@ function buildSelect() {
   $('select-count').textContent = `${have}/${total} GUARDIANS`;
   buildDiffSelector();
   showDetail(selectedHero);
+  updateSetupCopy();
 }
 function showDetail(i) {
   const h = HEROES[i];
@@ -5502,6 +5576,7 @@ function showDetail(i) {
     ups.map((u, i) => `<div class="kit-row${i === 0 ? ' sig' : ''}"><b>${u[0]} ${u[1]}</b><span>${u[2]}</span></div>`).join('') +
     (m != null ? `<div class="kit-row mastery"><b>BEST</b><span style="color:${TIER_COLORS[m]}">${TIER_NAMES[m]}</span></div>` : '');
   $('hero-detail').classList.remove('hidden');
+  $('hero-detail').style.setProperty('--hero-accent', h.accent);
 }
 // rough sustained-DPS estimate so heroes can be compared at a glance
 function heroPower(h) {
@@ -5529,8 +5604,9 @@ function wire() {
   $('btn-retry').addEventListener('click', () => {
     Sound.sfx.uiClick();
     $('screen-over').classList.add('hidden');
-    if (G.daily) startDaily(); else goSelect();   // replay the same daily
+    if (G.daily) startDaily(); else newGame(G.startHero, G.diff.id);
   });
+  $('btn-change-guardian').addEventListener('click', () => { $('screen-over').classList.add('hidden'); goSelect(); });
   $('btn-roster').addEventListener('click', () => {
     if ($('screen-roster').classList.contains('hidden')) openRoster();
     else closeRoster();
@@ -5549,12 +5625,14 @@ function wire() {
   $('dash-btn').addEventListener('pointerdown', e => { e.stopPropagation(); tryDash(); });
   $('ps-btn').addEventListener('pointerdown', e => { e.stopPropagation(); tryPowershot(); });
   $('btn-lu-reroll').addEventListener('click', () => {
-    if (G.rerolls <= 0) return;
+    if (G.rerolls <= 0 || G.draftBusy) return;
     G.rerolls--;
     Sound.sfx.uiSelect();
     showLevelUp();   // deal a fresh hand
   });
   $('btn-lu-skip').addEventListener('click', () => {
+    if (G.draftBusy) return;
+    G.draftBusy = true;
     Sound.sfx.uiBack();
     if (player) player.hp = Math.min(maxHP(), player.hp + maxHP() * 0.15);   // reward: patch up instead of powering up
     closeLevelUp();
@@ -5615,6 +5693,121 @@ function maybeOfferInstall() {
     [{ label: 'Got it', primary: true }]);
 }
 
+// ---------------- Expedition presentation & progression ----------------
+function encounterTime() {
+  return G.time * Expedition.mode(G.session && G.session.mode).pace;
+}
+function bindExpeditionSetup() {
+  const fill = (id, list, value, label) => {
+    $(id).innerHTML = list.map(x => `<option value="${x.id}">${label(x)}</option>`).join('');
+    $(id).value = value;
+  };
+  fill('run-mode', Expedition.modes, selectedMode, m => `${m.name} · ${m.length}`);
+  fill('run-route', Expedition.routes, selectedRoute, r => r.name);
+  fill('run-blessing', Expedition.blessings, selectedBlessing, b => b.name);
+  for (const id of ['run-mode', 'run-route', 'run-blessing']) $(id).addEventListener('change', () => {
+    selectedMode = Expedition.mode($('run-mode').value).id;
+    selectedRoute = Expedition.route($('run-route').value).id;
+    selectedBlessing = Expedition.blessing($('run-blessing').value).id;
+    Sound.sfx.uiSelect(); updateSetupCopy();
+  });
+}
+function updateSetupCopy() {
+  const m = Expedition.mode(selectedMode), r = Expedition.route(selectedRoute), b = Expedition.blessing(selectedBlessing);
+  $('run-setup-copy').textContent = `${b.desc}  ·  ${r.rule}`;
+  $('btn-start').textContent = selectedMode === 'blitz' ? 'GO BLITZ ›' : 'LET’S GO ›';
+  $('btn-start').title = m.desc;
+}
+function refreshHome() {
+  const save = loadSave(), st = Expedition.migrate(save);
+  $('home-wallet').textContent = `${(save.shells || 0).toLocaleString()} shells`;
+  $('home-progress').innerHTML = `<div><b>${save.unlocked.length}/24</b><span>Guardians unlocked</span></div>` +
+    `<div><b>${st.clears}</b><span>island clears</span></div><div><b>${st.contracts}</b><span>objectives earned</span></div>`;
+  if (save.lastHero !== undefined) $('btn-menu-continue').classList.remove('hidden');
+  const best = (save.daily || {})[dayKey()];
+  $('home-daily').textContent = best ? `Today’s best: ${best.toLocaleString()}` : 'One island. One shared challenge.';
+}
+function expeditionStats() {
+  return { rescues: G.session.rescues, kills: G.kills, powershots: G.session.powershots };
+}
+function updateExpedition(dt) {
+  if (!G.session) return;
+  G.session.rally = Math.max(0, G.session.rally - dt);
+  const earned = Expedition.complete(G.session, expeditionStats());
+  for (const c of earned) {
+    banner(`${c.name.toUpperCase()} · +${c.reward} SHELLS`);
+    Sound.sfx.unlock(); buzz(HAPTIC.level);
+  }
+  if (earned.length) renderContracts();
+}
+function updateExpeditionHud() {
+  if (!G.session) return;
+  const m = Expedition.mode(G.session.mode);
+  const fraction = Math.min(1, G.time / G.nextBossAt);
+  const phase = G.boss ? 'BOSS FIGHT' : fraction < 0.34 ? 'ASSEMBLE' : fraction < 0.76 ? 'POWER UP' : 'HOLD THE LINE';
+  setHud('run-phase', 't', `${G.daily ? 'DAILY' : m.name.toUpperCase()} · ${phase}`);
+  setHud('run-track-fill', 'w', Math.round(fraction * 100) + '%');
+  const all = Expedition.progress(G.session, expeditionStats());
+  const next = all.find(c => !c.done);
+  setHud('run-objective', 't', G.boss ? (G.boss.kind === 'reef' ? 'Defeat the Reef Mother' : 'Defeat King Glob') : G.daily ? `King Glob in ${fmtTime(Math.max(0, G.nextBossAt - G.time))}` :
+    next ? `${next.name}  ${next.value}/${next.target}` : '★★★ All objectives complete');
+  $('rally-hud').classList.toggle('hidden', G.session.rally <= 0);
+  if (G.session.rally > 0) setHud('rally-hud', 't', `RALLY ${Math.ceil(G.session.rally)}s`);
+}
+function renderContracts() {
+  if (!G.session) return;
+  const el = $('run-contracts');
+  el.innerHTML = G.daily ? '<div class="contract"><b>Daily challenge</b><span>Fixed island · Shrine perks and blessings disabled</span></div>' :
+    Expedition.progress(G.session, expeditionStats()).map(c => `<div class="contract${c.done ? ' done' : ''}">` +
+      `<b>${c.done ? '★' : '☆'} ${c.name} · ${c.value}/${c.target}</b><span>${c.detail} · +${c.reward} shells</span>` +
+      `<div class="contract-track"><i style="width:${c.value / c.target * 100}%"></i></div></div>`).join('');
+}
+function renderExpeditionRecap() {
+  const run = G.session;
+  if (!run) return;
+  const modeName = G.daily ? 'Daily challenge' : Expedition.mode(run.mode).name;
+  $('expedition-recap').innerHTML = `<div class="expedition-result"><div class="grade">${Expedition.grade(run, G.victory)}</div>` +
+    `<div class="result-copy"><b>${modeName} · ${Expedition.route(run.route).name}</b>` +
+    `${run.extracted ? 'Island liberated. Your squad made it home.' : G.victory ? 'A legendary stand against the horde.' : 'Rescue. Experiment. Come back stronger.'}` +
+    (!G.daily ? `<div class="medal-row">${Expedition.contracts.map(c => `<span class="${run.completed.includes(c.id) ? 'earned' : ''}">${run.completed.includes(c.id) ? '★' : '☆'} ${c.name}</span>`).join('')}</div>` : '') +
+    (run.evolved.length ? `<span>Evolved: ${run.evolved.join(' · ')}</span>` : '') + '</div></div>';
+}
+function checkRelicEvolutions() {
+  for (const r of relics) {
+    if (r.evolved) continue;
+    const evo = Expedition.evolution(r.def.id, r.lv, G.upTaken);
+    if (!evo) continue;
+    r.evolved = evo; r.cd = 0;
+    G.session.evolved.push(evo.name); G.relicDirty = 1;
+    banner(`RELIC EVOLVED · ${evo.name.toUpperCase()}`);
+    effects.push({ type: 'tierup', f: player, color: '#ffcf73', t: 0, dur: 1.2 });
+    Sound.sfx.unlock(); buzz(HAPTIC.power);
+  }
+}
+function applyUpgrade(pick) {
+  if (!pick || G.over) return false;
+  if (pick.once && G.mods.taken[pick.id]) return false;
+  if (pick.once || pick.relic) G.mods.taken[pick.id] = true;
+  pick.apply(G.mods, G);
+  if (!pick.relic && pick.hero === undefined) G.upTaken[pick.id] = (G.upTaken[pick.id] || 0) + 1;
+  if (pick.id === 'plague') G.plagueOn = 1;
+  checkRelicEvolutions();
+  refreshBuildStrip();
+  return true;
+}
+function upgradeHint(pick) {
+  if (pick.relic) {
+    const recipe = Expedition.evolutions.find(e => pick.id.startsWith(`relic_${e.relic}_`));
+    if (!recipe) return '';
+    const up = UPGRADES.find(u => u.id === recipe.upgrade);
+    const ready = !!G.upTaken[recipe.upgrade];
+    return `<small class="evo-hint${ready ? ' ready' : ''}">${ready ? '✓' : '◇'} Evolve at IV + ${up.name}<br>${recipe.name}: ${recipe.desc}</small>`;
+  }
+  const links = relics.filter(r => !r.evolved && Expedition.recipe(r.def.id).upgrade === pick.id);
+  if (links.length) return `<small class="evo-hint ready">◇ Evolution key for ${links.map(r => r.def.name).join(' & ')}</small>`;
+  return `<small class="evo-hint">${pick.hero !== undefined ? 'Signature · changes this Guardian’s weapon' : pick.once ? 'Unique power · one per run' : `Squad upgrade · rank ${(G.upTaken[pick.id] || 0) + 1}`}</small>`;
+}
+
 // ---------------- Boot ----------------
 Sprites.init().then(() => {
   buildTitle();
@@ -5636,6 +5829,8 @@ if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
 // debug/testing handle
 window.__balitopia = {
   G, enemies,
+  update, updateRelics, updateExpedition, applyUpgrade, checkRelicEvolutions, killBoss, endGame, maxHP,
+  setRunSetup: (mode, route, blessing) => { selectedMode = Expedition.mode(mode).id; selectedRoute = Expedition.route(route).id; selectedBlessing = Expedition.blessing(blessing).id; },
   player: () => player,
   allies: () => allies,
   cages: () => cages,

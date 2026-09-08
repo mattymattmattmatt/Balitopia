@@ -2,8 +2,10 @@
   "scripts": {
     "gen-sfx": "node scripts/generate-sfx.js",
     "gen-music": "node scripts/generate-music.js",
-    "test": "node tools/test/regress.js",
-    "bench": "node tools/test/bench.js"
+    "test": "node --test tools/test/expedition.test.js",
+    "bench": "node tools/test/bench.js",
+    "test:browser": "node tools/test/regress.js",
+    "build": "bash tools/build.sh"
   },
   "dependencies": {
     "dotenv": "^17.4.2",

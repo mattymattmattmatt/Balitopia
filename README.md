@@ -3,6 +3,21 @@
 A Vampire-Survivors-style horde survival game built for **mobile phones in landscape mode**.
 No engine, no dependencies, no build step — pure HTML5 canvas. Open `index.html` and play.
 
+## Expedition overhaul
+
+The game now opens into a redesigned Guardian and expedition flow:
+
+- **Expedition:** King Glob arrives at 6:00. Defeat him to finish and bank the win.
+- **Blitz:** King Glob arrives at 3:00, encounters advance twice as quickly and gems grant 65% more XP. Score multiplier: 0.8×.
+- **Endless:** the original escalating boss / curse loop, with no fixed finish.
+- Choose **Emerald Wilds**, **Sapphire Coast** or **Sunspire Heights**, then a **Tidekeeper**, **Stormcaller** or **Pathfinder** blessing. Daily Challenges keep their fixed setup and ignore blessings and Shrine perks.
+- Three run objectives reward 30 shells each: rescue three Guardians, defeat 120 enemies, and fire three powershots. A non-daily victory adds 60 shells. Earn all three objectives and win for an S grade.
+- Every third rescue triggers an **8-second Squad Rally**: +30% Guardian weapon damage, a nearby gem vacuum, and +35% powershot charge. Each rescue restores one Soul and gives the rescued Guardian at least 65% powershot charge.
+- All eight relics can **evolve** at level IV with a matching squad upgrade. Recipes are printed on draft cards, and the matching upgrade is highlighted when a relic is owned.
+- **Run it back** immediately replays the same loadout; **Change Guardian** opens the full setup. Old saves migrate without removing unlocks, records, perks or shells.
+
+See [STUDIO_OVERHAUL.md](STUDIO_OVERHAUL.md) for the complete evolution table, validation and playtest limits.
+
 ## 📖 The Story
 
 Far across the warm seas lies **Balitopia** — an island where the volcano sleeps politely,
@@ -28,7 +43,7 @@ when the ground begins to shake... make the Hunger go hungry.
 | Action | Control |
 |---|---|
 | Move | Touch & drag one half of the screen — **which half is a setting** (or WASD/arrows on desktop) |
-| **Dash** | **Double-tap** the movement side, or press the ⟫ button — a short dodge with i-frames, 6s cooldown |
+| **Dash** | **Double-tap** the movement side, or press Shift / the ⟫ button — a short dodge with i-frames, 6s cooldown |
 | Attack | Automatic — every Guardian's power auto-aims at the horde |
 | **Powershot** | Tap the other half (or Space) when the ⚡ button glows — a screen-clearing blast in their signature style |
 | Free a Guardian | Shoot their bamboo cage until it breaks (gold arrow points to the nearest one). Some cages are **guarded** |
@@ -88,8 +103,8 @@ number density, **assist mode**, and save export/import/erase.
 - **Elites** — any enemy can spawn Elite: 6× HP, an aura, a name tag and one affix
   (*Gilded*, *Splitting*, *Warded*, *Volatile*, *Swift*). They drop chests.
 - **The Golden One** — rare, sprints away, drops a treasure chest if you catch it.
-- **KING GLOB** — arrives at **6:00**, with a Gorge that drags you in and a Crown Split you
-  have to break before he heals. **Endless mode**: every kill starts a new round — you draft
+- **KING GLOB** — arrives at **6:00** (3:00 in Blitz), with a Gorge that drags you in and a Crown Split you
+  have to break before he heals. **Endless mode only**: every kill starts a new round — you draft
   one of two **curses** for bonus score, and the **Reef Mother** (a stationary arena boss with
   sweeping beams) alternates in. The run ends only when the tide takes you.
 
@@ -148,6 +163,5 @@ for the full list, generation prompts, and how to enable each one.
 
 ### Getting around
 
-Title → **START** plays the story, then hero select; **CONTINUE** (after your first run) jumps
-straight to select with your last Guardian preselected. Every menu screen has a **‹ BACK**
+Title → **PLAY** opens Guardian and expedition selection; **QUICK PLAY** (after your first run) starts with your last loadout. **THE STORY** is an optional menu entry. Every menu screen has a **‹ BACK**
 button, and the title music hushes on the select screen so you can preview each Guardian's theme.
