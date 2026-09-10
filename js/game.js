@@ -26,40 +26,26 @@ const CELL = 88;                    // spatial hash cell
 const MAX_ENEMIES = 300;
 const MAX_PROJ = 400;
 const MAX_GEMS = 500;
-const MAX_PARTS = 420;
+const MAX_PARTS = 160;
 const DASH_CD = 6;                  // seconds
 const DASH_DIST = 190;
 const DASH_IFRAME = 0.32;
 
-// Quality presets — auto-selected from a boot benchmark, overridable in Settings.
-// DPR is the dominant lever: it scales every full-screen fill quadratically,
-// and profiling showed the frame is fill-bound, not JS-bound. Measured on a
-// 3x-density viewport with 300 enemies: dpr 1.75 -> 1.0 doubled the frame rate.
-// This art is soft and painted, not pixel art, so 1.25 is visually fine.
-// `maxEnemies` caps how many can be ALIVE at once. Measured on a 4x-throttled
-// profile of the worst case (a full roster in a saturated horde): the horde
-// saturating at the 300-strong pool costs ~27% of the frame rate against a
-// 160 cap, and the curve is flat below that — so the cap buys most of what a
-// low resolution does, without softening the picture.
+// Spend the visual budget on kills. No full-screen light composite, fewer
+// props and sparks, and hard limits for cosmetic effects and gore. Damage,
+// blast radius and XP never depend on whether a visual effect is admitted.
 const QUALITY = {
-  high:     { parts: 1.0,  statusFx: 34, dpr: 1.3,  light: 1, decor: 1.0,  trails: 1, lightScale: 0.45, maxEnemies: 300 },
-  balanced: { parts: 0.55, statusFx: 18, dpr: 1.05, light: 1, decor: 0.7,  trails: 1, lightScale: 0.36, maxEnemies: 300 },
-  battery:  { parts: 0.25, statusFx: 8,  dpr: 0.9,  light: 1, decor: 0.4,  trails: 0, lightScale: 0.3,  maxEnemies: 230 },
-  // The floor of the ladder, and the one a struggling phone should sit on.
-  // Keeps the light pass — dropping it measured worth only ~8% and costs the
-  // entire look — and spends the budget on resolution and entity count instead.
-  perf:     { parts: 0.18, statusFx: 6,  dpr: 0.8,  light: 1, decor: 0.3,  trails: 0, lightScale: 0.28, maxEnemies: 150 },
+  high:     { parts: 0.35, statusFx: 14, dpr: 1.15, light: 0, decor: 0.55, trails: 0, maxEnemies: 300, effects: 80, particleBurst: 56, gibs: 320, goreBurst: 128, stainTiles: 64 },
+  balanced: { parts: 0.20, statusFx: 8,  dpr: 1.0,  light: 0, decor: 0.35, trails: 0, maxEnemies: 300, effects: 56, particleBurst: 32, gibs: 240, goreBurst: 96,  stainTiles: 48 },
+  battery:  { parts: 0.12, statusFx: 5,  dpr: 0.9,  light: 0, decor: 0.20, trails: 0, maxEnemies: 230, effects: 36, particleBurst: 20, gibs: 160, goreBurst: 64,  stainTiles: 32 },
+  perf:     { parts: 0.08, statusFx: 3,  dpr: 0.8,  light: 0, decor: 0.12, trails: 0, maxEnemies: 150, effects: 24, particleBurst: 12, gibs: 120, goreBurst: 48,  stainTiles: 24 },
 };
-let LIGHT_SCALE = 0.5, LIGHT_CAP = 64;   // declared before resize() first runs
-let QL = QUALITY.high;
+let QL = QUALITY.balanced;
 
 // ---------------- Canvas ----------------
 const canvas = document.getElementById('game');
 const ctx = canvas.getContext('2d', { alpha: false });
 let cw = 0, ch = 0, viewScale = 1, viewW = 1000, viewH = VIEW_H, dpr = 1;
-// half-res offscreen buffer for the additive light/glow pass
-const lightCv = document.createElement('canvas');
-const lightCtx = lightCv.getContext('2d');
 
 let resizePending = false;
 function resize() {
@@ -68,14 +54,9 @@ function resize() {
   const nw = Math.round(window.innerWidth), nh = Math.round(window.innerHeight);
   viewScale = Math.max(0.42, Math.min(1.7, Math.sqrt(nw * nh / VIEW_AREA))) / viewMul;
   viewW = nw / viewScale; viewH = nh / viewScale;
-  const nls = QL.lightScale || 0.5;
-  if (nw === cw && nh === ch && nd === dpr && nls === LIGHT_SCALE) return;
+  if (nw === cw && nh === ch && nd === dpr) return;
   cw = nw; ch = nh; dpr = nd;
   canvas.width = Math.round(cw * dpr); canvas.height = Math.round(ch * dpr);
-  LIGHT_SCALE = QL.lightScale || 0.5;
-  LIGHT_CAP = QL.parts >= 1 ? 64 : QL.parts >= 0.5 ? 40 : 24;
-  lightCv.width = Math.max(1, Math.round(cw * LIGHT_SCALE));
-  lightCv.height = Math.max(1, Math.round(ch * LIGHT_SCALE));
 }
 const queueResize = () => { if (!resizePending) { resizePending = true; requestAnimationFrame(resize); } };
 window.addEventListener('resize', queueResize);
@@ -216,7 +197,8 @@ let heroState = [];            // per-hero mastery: { dmg, tier, charge, kills, 
 let heroMods = [];             // per-hero signature-upgrade mods (only that hero's weapon)
 let powerWaves = [];           // queued powershot projectile rings
 let relics = [];               // [{ def, lv, ws }] — the second weapon slot
-let chests = [], corpses = [], pools = [], ghosts = [], spires = [], totems = [];
+let chests = [], pools = [], ghosts = [], spires = [], totems = [];
+const gore = Gore.create({ makeCanvas: () => document.createElement('canvas'), world: WORLD });
 const freshHeroMod = () => ({ dmg: 1, rate: 1, area: 1, speed: 1, pierceAdd: 0, countAdd: 0, jumpsAdd: 0, exploadMul: 1, fx: {} });
 
 // ---------------- Shared effective-weapon resolution ----------------
@@ -260,7 +242,7 @@ function addDamage(src, amt) {
       banner(`✦ ${HEROES[src].name}'s ${HEROES[src].power.split(' — ')[0]} now ${EVO_NOTE[wtype] || 'transcends'}`);
       Sound.sfx.powershot();
       buzz(60);
-      if (f) { effects.push({ type: 'tierup', f, color: '#ffee58', t: 0, dur: 1.3 }); spawnParts(f.x, f.y - 20, '#ffee58', 30, 230); }
+      if (f) { addEffect({ type: 'tierup', f, color: '#ffee58', t: 0, dur: 1.3 }); spawnParts(f.x, f.y - 20, '#ffee58', 30, 230); }
       // first-ever Super Saiyan (any hero) is a milestone
       try {
         const save = loadSave();
@@ -272,7 +254,7 @@ function addDamage(src, amt) {
       buzz(30);
       if (f) {
         spawnParts(f.x, f.y - 20, TIER_COLORS[hs.tier], 18, 170);
-        effects.push({ type: 'tierup', f, color: TIER_COLORS[hs.tier], t: 0, dur: 0.9 });
+        addEffect({ type: 'tierup', f, color: TIER_COLORS[hs.tier], t: 0, dur: 0.9 });
       }
     }
   }
@@ -290,6 +272,24 @@ const ebullets = []; for (let i = 0; i < 80; i++) ebullets.push({ alive: false }
 const gems = [];     for (let i = 0; i < MAX_GEMS; i++) gems.push({ alive: false });
 const parts = [];    for (let i = 0; i < MAX_PARTS; i++) parts.push({ alive: false });
 let hearts = [], patches = [], effects = [], floaters = [], telegraphs = [];
+let partCursor = 0;
+function configureGore() {
+  gore.configure({ level: prefs.gore, motion: !!prefs.motion, bits: QL.gibs, tiles: QL.stainTiles, burst: QL.goreBurst });
+}
+function nearView(x, y, pad = 120) {
+  if (!player) return false;
+  const zoom = G.cam.zoom || 1;
+  return Math.abs(x - G.cam.x) < viewW * zoom / 2 + pad && Math.abs(y - G.cam.y) < viewH * zoom / 2 + pad;
+}
+function addEffect(fx) {
+  const cap = QL.effects || 56;
+  if (effects.length >= cap) {
+    if (fx.type !== 'explo' && fx.type !== 'shock' && fx.type !== 'tierup') return;
+    const low = effects.findIndex(e => e.type === 'muzzle' || e.type === 'impact' || e.type === 'ghost');
+    effects.splice(low < 0 ? 0 : low, 1);
+  }
+  effects.push(fx);
+}
 
 function makeWS(heroIdx) {
   return HEROES[heroIdx].weapons.map(w => ({
@@ -572,10 +572,11 @@ function addAggFloater(e, dmg, color) {
 // (rotating), ring (expanding). Previously every effect in the game was the
 // same axis-aligned square.
 function spawnParts(x, y, color, n, spd, kind, grav) {
-  n = Math.max(1, Math.round(n * QL.parts));
+  if (!nearView(x, y) || (G.partsThisFrame || 0) >= QL.particleBurst) return;
+  n = Math.min(Math.round(n * QL.parts), QL.particleBurst - (G.partsThisFrame || 0));
   let made = 0;
   for (let i = 0; i < MAX_PARTS && made < n; i++) {
-    const p = parts[i];
+    const p = parts[partCursor]; partCursor = (partCursor + 1) % MAX_PARTS;
     if (p.alive) continue;
     p.alive = true; p.x = x; p.y = y;
     const a = Math.random() * 6.283, v = spd * (0.4 + Math.random() * 0.8);
@@ -587,6 +588,7 @@ function spawnParts(x, y, color, n, spd, kind, grav) {
     p.grav = grav === undefined ? 140 : grav;
     made++;
   }
+  G.partsThisFrame = (G.partsThisFrame || 0) + made;
 }
 // Directional trauma. A single scalar meant a powershot, a boss slam and a
 // scratch all shook the screen identically, so shake stopped meaning anything.
@@ -597,14 +599,14 @@ function shakeAt(x, y, amt) {
 // Muzzle flash at the firing point, oriented along the shot. Every weapon used
 // to fire with no visual origin at all — projectiles simply appeared.
 function muzzleFlash(f, ang, color, scale) {
-  if (effects.length > 120) return;
-  effects.push({ type: 'muzzle', x: f.x + Math.cos(ang) * 12, y: f.y - 12 + Math.sin(ang) * 12,
+  if (!nearView(f.x, f.y) || effects.length >= QL.effects / 2) return;
+  addEffect({ type: 'muzzle', x: f.x + Math.cos(ang) * 12, y: f.y - 12 + Math.sin(ang) * 12,
     ang, color, s: scale || 1, t: 0, dur: 0.11 });
 }
 // Directional spark burst where a projectile connects.
 function impactSpark(x, y, ang, color) {
-  if (effects.length > 130) return;
-  effects.push({ type: 'impact', x, y, ang, color, t: 0, dur: 0.18 });
+  if (!nearView(x, y) || effects.length >= QL.effects / 2) return;
+  addEffect({ type: 'impact', x, y, ang, color, t: 0, dur: 0.18 });
 }
 
 function spawnChest(x, y, kind) {
@@ -631,7 +633,8 @@ function dropGem(x, y, val) {
   free.val = val; free.t = 0; free.vx = 0; free.vy = 0;
 }
 
-function killEnemy(e, src) {
+function killEnemy(e, src, hit = {}) {
+  if (!e.alive) return;
   e.alive = false;
   G.kills++;
   const by = bodyY(e);
@@ -644,17 +647,11 @@ function killEnemy(e, src) {
     if (G.combo % 10 === 0) { Sound.sfx.combo(G.combo); addFloater(player.x, player.y - 60, `×${G.combo}`, '#ffd54f', 1.3); }
   }
   if (e.lastSrc != null && heroState[e.lastSrc]) heroState[e.lastSrc].kills++;
-  if (e.elite) { G.eliteKills++; onEliteDeath(e); }
+  if (e.elite) G.eliteKills++;
   if (e.type === 'golden') { spawnChest(e.x, e.y, 'gold'); banner('💰 THE GOLDEN ONE FALLS'); }
   else dropGem(e.x, e.y, e.xp * (G.diff && G.diff.rule === 'lean' ? 0.75 : 1) * (G.mut.xp || 1));
 
-  // death animation — enemies used to simply vanish
-  if (corpses.length < 46) corpses.push({ x: e.x, y: e.y, spr: e.base + e.tier, dh: e.dh, scale: e.scale,
-    vx: (e.kbx || 0) * 0.3 + (Math.random() - 0.5) * 60, vy: -60 - Math.random() * 50,
-    rot: (Math.random() - 0.5) * 6, t: 0, dur: 0.32, tint: `hsl(${TIERS[e.tier].hue},65%,55%)` });
-  const tint = `hsl(${TIERS[e.tier].hue},65%,55%)`;
-  spawnParts(e.x, by, tint, e.base === 'minyar' ? 5 : 10, 150, 'spark');
-  spawnParts(e.x, by, '#fff', 2, 90, 'puff');
+  gore.burst(e.x, e.y, e.cyOff || 20, e.r, { ...hit, visible: nearView(e.x, e.y, 180) });
 
   // lifesteal (Bloodtide upgrade + Swack's trait)
   const ls = G.mods.lifesteal + (src != null && HERO_TRAIT[HEROES[src].id].k === 'lifesteal' ? HERO_TRAIT[HEROES[src].id].v : 0);
@@ -677,7 +674,7 @@ function killEnemy(e, src) {
   }
   // Fixie's Shatterfrost: frozen enemies burst into a frost field
   if (e.slowT > 0 && G.shatterOn) {
-    effects.push({ type: 'explo', x: e.x, y: by, r: 76, t: 0, dur: 0.3, color: '#b3e5fc' });
+    addEffect({ type: 'explo', x: e.x, y: by, r: 76, t: 0, dur: 0.3, color: '#b3e5fc' });
     eachEnemyNear(e.x, e.y, 76, o => { if (o.alive) o.slowT = Math.max(o.slowT, 2.2); });
   }
 
@@ -694,15 +691,19 @@ function killEnemy(e, src) {
     Sound.playFile('assets/audio/enemies/demonder_defeat.wav', 0.7);
     if (dropsHearts() && Math.random() < 0.14) hearts.push({ x: e.x, y: e.y, t: 0 });
   } else if (Math.random() < 0.25) Sound.sfx.kill();
+  // Splitting can reuse this pooled enemy immediately. Finish all reads and
+  // death rewards before allowing the slot to become a new living enemy.
+  if (e.elite) onEliteDeath(e);
 }
 // Nightmare removes heart drops entirely; the Famine mutator does too.
 const dropsHearts = () => !(G.diff && G.diff.rule === 'noheart') && !G.mut.noHearts;
 
 function onEliteDeath(e) {
   const af = e.affix;
+  const { x, y, type, tier } = e;
   banner(`💀 ${af.name.toUpperCase()} SLAIN`);
   spawnParts(e.x, bodyY(e), af.color, 26, 240, 'spark');
-  hitStop(0.07); shakeAt(e.x, e.y, 9); buzz(HAPTIC.tick);
+  shakeAt(e.x, e.y, 6); buzz(HAPTIC.tick);
   if (dropsHearts()) hearts.push({ x: e.x, y: e.y, t: 0 });
   if (af.id === 'gilded') {
     for (let i = 0; i < 8; i++) dropGem(e.x + (Math.random() - 0.5) * 90, e.y + (Math.random() - 0.5) * 70, Math.round(e.xp * 1.4));
@@ -710,7 +711,7 @@ function onEliteDeath(e) {
   } else if (af.id === 'splitting') {
     for (let i = 0; i < 4; i++) {
       const a = Math.random() * 6.283;
-      spawnEnemy(e.type, Math.max(0, e.tier - 1), e.x + Math.cos(a) * 44, e.y + Math.sin(a) * 44);
+      spawnEnemy(type, Math.max(0, tier - 1), x + Math.cos(a) * 44, y + Math.sin(a) * 44);
     }
   } else if (af.id === 'volatile') {
     pools.push({ x: e.x, y: e.y, r: 96, life: 6, dps: e.dmg * 0.8, color: '#ff7043', hostile: 1 });
@@ -769,9 +770,9 @@ function damageEnemy(e, dmg, o) {
   // called from anywhere — every hit in the game landed in total silence.
   Sound.sfx.hit(crit);
   if (crit) {
-    addFloater(e.x, bodyY(e) - e.r - 10, Math.round(dmg), '#ffd54f', 1.5);
+    if (prefs.dmgnum !== 'off') addFloater(e.x, bodyY(e) - e.r - 10, Math.round(dmg), '#ffd54f', 1.5);
     spawnParts(e.x, bodyY(e), '#fff59d', 5, 190, 'spark');
-    hitStop(0.035); buzz(HAPTIC.crit);
+    buzz(HAPTIC.crit);
     // Zappo's crits chain; Yellogen's crits shatter
     const tr = o.src != null && HERO_TRAIT[HEROES[o.src].id];
     if (tr && tr.k === 'chainAll') {
@@ -783,9 +784,7 @@ function damageEnemy(e, dmg, o) {
     // registers, but repeats on one enemy pool into a single rising number
     addAggFloater(e, Math.round(dmg), e.ai === 'shielded' ? '#b0bec5' : '#fff');
   }
-  // hit-stop on a genuinely heavy blow, so big hits land with weight
-  if (dmg >= e.maxhp * 0.35 && dmg > 30) hitStop(0.03);
-  if (e.hp <= 0) killEnemy(e, o.src);
+  if (e.hp <= 0) killEnemy(e, o.src, o);
 }
 
 // Conditional per-hero damage traits, resolved at the damage site.
@@ -812,21 +811,19 @@ function damageBoss(dmg, o) {
   b.hp -= dmg; b.flash = 0.07;
   addDamage(o.src, dmg);
   if (o.slow) b.slowT = Math.max(b.slowT, o.slow * 0.3);
-  addFloater(b.x + (Math.random() - 0.5) * 60, b.y - 90, Math.round(dmg), '#ffd54f');
+  if (prefs.dmgnum !== 'off') addFloater(b.x + (Math.random() - 0.5) * 60, b.y - 90, Math.round(dmg), '#ffd54f');
   Sound.sfx.bossHit();
-  if (b.hp <= 0) killBoss(b);
+  if (b.hp <= 0) killBoss(b, o);
 }
 
 // Endless mode: killing King Glob rolls the run into the next round.
 // Enemies get tougher, and he crawls back out of the mountain even angrier.
-function killBoss(b) {
+function killBoss(b, hit = {}) {
   if (!b || !b.alive || G.over) return;
   b.alive = false;
   G.bossKills++;
   G.shake = 18;
-  hitStop(0.32);   // big dramatic freeze on the kill
-  spawnParts(b.x, b.y, '#8bc34a', 60, 260);
-  spawnParts(b.x, b.y, '#ffd54f', 40, 200);
+  gore.burst(b.x, b.y, 70, 48, { ...hit, boss: true, blast: true, visible: nearView(b.x, b.y, 250) });
   for (let i = 0; i < 6; i++)
     dropGem(b.x + (Math.random() - 0.5) * 120, b.y + (Math.random() - 0.5) * 90, 25);
   Sound.playFile('assets/audio/enemies/glob_defeat.wav', 1);
@@ -917,7 +914,7 @@ function hurtPlayer(dmg, srcName) {
   if (G.wardUp) {
     G.wardUp = 0; G.wardT = 12;
     player.iv = 0.8;
-    effects.push({ type: 'shock', x: player.x, y: player.y, r: 90, t: 0, dur: 0.4, color: '#80cbc4' });
+    addEffect({ type: 'shock', x: player.x, y: player.y, r: 90, t: 0, dur: 0.4, color: '#80cbc4' });
     Sound.sfx.wardBreak(); buzz(HAPTIC.tick);
     addFloater(player.x, player.y - 46, 'WARD', '#80cbc4', 1.2);
     return;
@@ -939,7 +936,7 @@ function hurtPlayer(dmg, srcName) {
       banner('🕯️ SECOND WIND!');
       Sound.sfx.heal();
       slowMo(0.2, 0.7);
-      effects.push({ type: 'tierup', f: player, color: '#fff59d', t: 0, dur: 0.9 });
+      addEffect({ type: 'tierup', f: player, color: '#fff59d', t: 0, dur: 0.9 });
       return;
     }
     player.hp = 0;
@@ -1082,8 +1079,8 @@ function fireWeapon(f, w, ws, isAlly, dt) {
         grow: FX.swell ? 9 : 0, owner: f, boomerang: FX.grudge ? 1 : 0,
       });
     }
-    if (FX.ring) effects.push({ type: 'shock', x: f.x, y: f.y, r: 190 * areaMul, t: 0, dur: 0.45, color: w.color });
-    if (!isAlly) { Sound.sfx.weapon('nova'); effects.push({ type: 'shock', x: f.x, y: f.y, r: 90, t: 0, dur: 0.28, color: w.color }); }
+    if (FX.ring) addEffect({ type: 'shock', x: f.x, y: f.y, r: 190 * areaMul, t: 0, dur: 0.45, color: w.color });
+    if (!isAlly) { Sound.sfx.weapon('nova'); addEffect({ type: 'shock', x: f.x, y: f.y, r: 90, t: 0, dur: 0.28, color: w.color }); }
     return;
   }
 
@@ -1129,7 +1126,7 @@ function fireWeapon(f, w, ws, isAlly, dt) {
     // Zappo's Chain Reaction: the arc travels back down the chain
     if (FX.rebound) for (let j = chainHit.length - 1; j >= 0; j--)
       if (chainHit[j].alive) damageEnemy(chainHit[j], w.dmg * dmgMul * 0.45, { src, noCrit: 1, fromX: f.x, fromY: f.y });
-    effects.push({ type: 'chain', pts, t: 0, dur: 0.2, color: w.color, rebound: FX.rebound });
+    addEffect({ type: 'chain', pts, t: 0, dur: 0.2, color: w.color, rebound: FX.rebound });
     if (!isAlly) { Sound.sfx.weapon('chain'); muzzleFlash(f, ang, w.color, 0.9); }
     return;
   }
@@ -1159,7 +1156,7 @@ function fireWeapon(f, w, ws, isAlly, dt) {
       const along = px * dx + py * dy;
       if (along > 0 && along < L && Math.abs(px * dy - py * dx) < W2 + 26) damageCage(c, w.dmg * dmgMul);
     }
-    effects.push({ type: 'beam', x: f.x, y: f.y, ang, len: L, wid: w.width * areaMul, t: 0, dur: 0.16, color: w.color });
+    addEffect({ type: 'beam', x: f.x, y: f.y, ang, len: L, wid: w.width * areaMul, t: 0, dur: 0.16, color: w.color });
     if (!isAlly) { Sound.sfx.weapon('beam'); muzzleFlash(f, ang, w.color, 1.5); }
     return;
   }
@@ -1199,7 +1196,7 @@ function fireWeapon(f, w, ws, isAlly, dt) {
         if (Math.abs(da) < half + 0.3) damageCage(c, w.dmg * dmgMul);
       }
     }
-    effects.push({ type: 'slash', x: f.x, y: f.y, ang, r: R, arc: E.arc, t: 0, dur: 0.2, color: w.color });
+    addEffect({ type: 'slash', x: f.x, y: f.y, ang, r: R, arc: E.arc, t: 0, dur: 0.2, color: w.color });
     if (!isAlly) { Sound.sfx.weapon('slash'); muzzleFlash(f, ang, w.color, 1.3); }
     return;
   }
@@ -1215,7 +1212,7 @@ function fireWeapon(f, w, ws, isAlly, dt) {
     if (G.bloomN % m.bloom === 0) {
       for (let i = 0; i < 12; i++)
         fireShotVolley(f, w, i / 12 * 6.283, 1, dmgMul * 0.8, areaMul, eSpeedMul, ePierce, eExplodeMul, FX, src, true);
-      effects.push({ type: 'shock', x: f.x, y: f.y, r: 150, t: 0, dur: 0.4, color: '#f8bbd0' });
+      addEffect({ type: 'shock', x: f.x, y: f.y, r: 150, t: 0, dur: 0.4, color: '#f8bbd0' });
       Sound.sfx.nova();
     }
   }
@@ -1254,14 +1251,15 @@ function tickTimers(dt) {
 }
 
 function explodeAt(x, y, r, dmg, src) {
+  const hit = { src, fromX: x, fromY: y, blast: true };
   eachEnemyNear(x, y, r + 30, e => {
-    if ((e.x - x) ** 2 + (e.y - y) ** 2 < (r + e.r) ** 2) damageEnemy(e, dmg, { src });
+    if ((e.x - x) ** 2 + (e.y - y) ** 2 < (r + e.r) ** 2) damageEnemy(e, dmg, hit);
   });
-  if (G.boss && G.boss.alive && (G.boss.x - x) ** 2 + (G.boss.y - y) ** 2 < (r + G.boss.r) ** 2) damageBoss(dmg, { src });
+  if (G.boss && G.boss.alive && (G.boss.x - x) ** 2 + (G.boss.y - y) ** 2 < (r + G.boss.r) ** 2) damageBoss(dmg, hit);
   for (const c of cages) {
     if (!c.broken && (c.x - x) ** 2 + (c.y - y) ** 2 < (r + 30) ** 2) damageCage(c, dmg);
   }
-  effects.push({ type: 'explo', x, y, r, t: 0, dur: 0.3, color: '#ff9e40' });
+  addEffect({ type: 'explo', x, y, r, t: 0, dur: 0.3, color: '#ff9e40' });
   spawnParts(x, y, '#ff9e40', 8, 180);
 }
 
@@ -1308,7 +1306,6 @@ function updateProjs(dt) {
     }
 
     if (p.grow) p.size += p.grow * dt;
-    if (G.windX) { p.vx += G.windX * dt; p.vy += G.windY * dt; }   // sky biome drift
     if (p.loopT <= 0) { p.x += p.vx * dt; p.y += p.vy * dt; }
     p.ang = Math.atan2(p.vy, p.vx);
     if (p.trail) { p.trail.push(p.x, p.y); if (p.trail.length > 8) p.trail.splice(0, 2); }
@@ -1455,7 +1452,7 @@ function updateEnemies(dt) {
       if (!e.erupted) {
         e.erupted = 1;
         if ((player.x - e.x) ** 2 + (player.y - e.y) ** 2 < 3600) hurtPlayer(e.dmg, 'a Burrower');
-        effects.push({ type: 'explo', x: e.x, y: e.y, r: 60, t: 0, dur: 0.3, color: '#8d6e63' });
+        addEffect({ type: 'explo', x: e.x, y: e.y, r: 60, t: 0, dur: 0.3, color: '#8d6e63' });
         spawnParts(e.x, e.y, '#8d6e63', 14, 190, 'shard');
         shakeAt(e.x, e.y, 6);
       }
@@ -1469,7 +1466,7 @@ function updateEnemies(dt) {
         e.buffCd = 3.5;
         let n = 0;
         eachEnemyNear(e.x, e.y, 190, o => { if (o !== e && o.alive && n < 8) { o.buffT = 4; n++; } });
-        effects.push({ type: 'shock', x: e.x, y: bodyY(e), r: 190, t: 0, dur: 0.5, color: '#ce93d8' });
+        addEffect({ type: 'shock', x: e.x, y: bodyY(e), r: 190, t: 0, dur: 0.5, color: '#ce93d8' });
       }
     }
     if (e.buffT > 0) { e.buffT -= dt; sp *= 1.25; }
@@ -1885,7 +1882,7 @@ function updateRelics(dt) {
             e.slowT = Math.max(e.slowT, w.slow);
             if (lv >= 4) damageEnemy(e, w.dmg * dmgMul * (evolved ? 2 : 1), { src: player.heroIdx, fromX: player.x, fromY: player.y });
           });
-          effects.push({ type: 'cone', x: player.x, y: player.y, ang: a, r: R, arc: w.arc, t: 0, dur: 0.3, color: w.color });
+          addEffect({ type: 'cone', x: player.x, y: player.y, ang: a, r: R, arc: w.arc, t: 0, dur: 0.3, color: w.color });
           Sound.sfx.weapon('nova');
         }
         break;
@@ -1898,7 +1895,7 @@ function updateRelics(dt) {
             if (!t) break;
             const dmg = w.dmg * dmgMul * (lv >= 2 ? 1.5 : 1);
             explodeAt(t.x, bodyY(t), w.radius * G.mods.area, dmg, player.heroIdx);
-            effects.push({ type: 'bolt', x: t.x, y: bodyY(t), t: 0, dur: 0.22, color: w.color });
+            addEffect({ type: 'bolt', x: t.x, y: bodyY(t), t: 0, dur: 0.22, color: w.color });
             if (lv >= 4) {
               let n = 0;
               eachEnemyNear(t.x, t.y, 200, e => { if (e !== t && n < 2) { n++; damageEnemy(e, dmg * 0.6, { src: player.heroIdx }); } });
@@ -1965,7 +1962,7 @@ function updateRelics(dt) {
     if (t.life <= 0) { totems.splice(i, 1); continue; }
     if (t.pulse <= 0) {
       t.pulse = t.every;
-      effects.push({ type: 'shock', x: t.x, y: t.y, r: t.r, t: 0, dur: 0.45, color: '#4dd0e1' });
+      addEffect({ type: 'shock', x: t.x, y: t.y, r: t.r, t: 0, dur: 0.45, color: '#4dd0e1' });
       eachEnemyNear(t.x, t.y, t.r + 30, e => {
         if ((e.x - t.x) ** 2 + (bodyY(e) - t.y) ** 2 < (t.r + e.r) ** 2) {
           damageEnemy(e, t.dmg, { src: player.heroIdx, knock: 120, kx: e.x - t.x, ky: e.y - t.y });
@@ -1991,7 +1988,7 @@ function tryDash() {
   const nx = clampW(player.x + Math.cos(a) * DASH_DIST), ny = clampW(player.y + Math.sin(a) * DASH_DIST);
   // afterimages along the path
   for (let i = 1; i <= 5; i++)
-    effects.push({ type: 'ghost', x: player.x + (nx - player.x) * i / 6, y: player.y + (ny - player.y) * i / 6,
+    addEffect({ type: 'ghost', x: player.x + (nx - player.x) * i / 6, y: player.y + (ny - player.y) * i / 6,
       heroIdx: player.heroIdx, fxDir: player.fx, t: -i * 0.012, dur: 0.3 });
   spawnParts(player.x, player.y, '#b2ebf2', 12, 170, 'puff', 0);
   player.x = nx; player.y = ny;
@@ -2040,7 +2037,7 @@ function fireBeat(kind) {
       banner('THEY FOUND YOU — BREAK THROUGH');
       break;
     }
-    case 'elite': spawnElite(); if (G.diff.rule === 'tide') spawnElite(); break;
+    case 'elite': spawnElite(); if (G.diff.rule === 'elites') spawnElite(); break;
     case 'siege': startSiege(); break;
     case 'surge': startSurge(); break;
     case 'miniboss': spawnMiniboss(); break;
@@ -2110,7 +2107,7 @@ function openChest(c) {
   G.chests++;
   const n = c.kind === 'gold' ? 3 + ((Math.random() * 3) | 0) : 1 + ((Math.random() * 2) | 0);
   spawnParts(c.x, c.y, '#ffd54f', 30, 250, 'spark');
-  effects.push({ type: 'shock', x: c.x, y: c.y, r: 130, t: 0, dur: 0.5, color: '#ffd54f' });
+  addEffect({ type: 'shock', x: c.x, y: c.y, r: 130, t: 0, dur: 0.5, color: '#ffd54f' });
   slowMo(0.35, 0.5); shakeAt(c.x, c.y, 7); buzz(HAPTIC.cage);
   Sound.sfx.chest();
   G.pendingChest = n;
@@ -2186,7 +2183,7 @@ function updatePickups(dt) {
     if (tg.t >= tg.dur) {
       if (tg.dmg > 0) {
         if ((player.x - tg.x) ** 2 + (player.y - tg.y) ** 2 < tg.r * tg.r) hurtPlayer(tg.dmg, tg.src || 'a ground slam');
-        effects.push({ type: 'explo', x: tg.x, y: tg.y, r: tg.r, t: 0, dur: 0.35, color: tg.color || '#8bc34a' });
+        addEffect({ type: 'explo', x: tg.x, y: tg.y, r: tg.r, t: 0, dur: 0.35, color: tg.color || '#8bc34a' });
         shakeAt(tg.x, tg.y, tg.small ? 5 : 9);
         Sound.sfx.slam();   // was bigKill() — a *reward* cue playing on player damage
       }
@@ -2226,12 +2223,6 @@ function updatePickups(dt) {
       }
     }
   }
-  for (let i = corpses.length - 1; i >= 0; i--) {
-    const c = corpses[i];
-    c.t += dt;
-    if (c.t > c.dur) { corpses.splice(i, 1); continue; }
-    c.x += c.vx * dt; c.y += c.vy * dt; c.vy += 520 * dt;
-  }
   for (let i = effects.length - 1; i >= 0; i--) {
     effects[i].t += dt;
     if (effects[i].t > effects[i].dur) effects.splice(i, 1);
@@ -2263,7 +2254,7 @@ function gainXP(v) {
     // the draft, and the late curve doesn't stall out into a dead plateau.
     G.xpNext = Math.round(9 * Math.pow(G.level, 1.25) + 8);
     Sound.sfx.level();
-    if (player) effects.push({ type: 'tierup', f: player, color: '#ffd54f', t: 0, dur: 0.8 });
+    if (player) addEffect({ type: 'tierup', f: player, color: '#ffd54f', t: 0, dur: 0.8 });
   }
   if (G.pendingLv > 0 && !overlayOpen()) queueOverlay(showLevelUp);
 }
@@ -2304,13 +2295,13 @@ function frame(ts) {
         applyQuality(QL === QUALITY.high ? 'balanced' : QL === QUALITY.balanced ? 'battery' : 'perf');
         goodStreak = 0;
         banner('⚙ QUALITY LOWERED FOR SMOOTHNESS — change it in Settings');
-      } else if (fps > 57 && QL !== QUALITY.high) {
+      } else if (fps > 57 && QL !== QUALITY.balanced) {
         // Step back up, but only after a sustained comfortable stretch — the
         // device heuristic starts phones low, and a strong phone shouldn't be
         // stuck there. Never oscillates: one downgrade resets the streak.
         if (++goodStreak >= 5) {
           goodStreak = 0;
-          applyQuality(QL === QUALITY.perf ? 'battery' : QL === QUALITY.battery ? 'balanced' : 'high');
+          applyQuality(QL === QUALITY.perf ? 'battery' : 'balanced');
         }
       } else goodStreak = 0;
     }
@@ -2321,6 +2312,7 @@ function frame(ts) {
     // hit-stop: freeze the sim for a few frames on impactful hits so they land with weight
     if (G.hitStop > 0 && G.running && !G.over) { G.hitStop -= dt; render(0); return; }
     if (G.running && !G.over && window.innerWidth > window.innerHeight) update(dt * G.timeScale);
+    if (G.over && $('screen-over').classList.contains('hidden')) gore.update(dt);
     // The game used to render a full 60fps playfield behind opaque full-screen
     // overlays. Nothing there changes — so don't draw it.
     if (anyOverlayOpen() && !G.running) {
@@ -2345,7 +2337,7 @@ function hitStop(dur) { if (prefs.motion) G.hitStop = Math.max(G.hitStop || 0, d
 
 function autoQuality(fps) {
   if (prefs.quality && prefs.quality !== 'auto') return;
-  const q = fps < 28 ? 'perf' : fps < 40 ? 'battery' : fps < 54 ? 'balanced' : 'high';
+  const q = fps < 28 ? 'perf' : fps < 40 ? 'battery' : 'balanced';
   const cur = QL === QUALITY.high ? 'high' : QL === QUALITY.balanced ? 'balanced'
             : QL === QUALITY.battery ? 'battery' : 'perf';
   if (q !== cur) { applyQuality(q); if (q !== 'high') banner(`⚙ ${q.toUpperCase()} QUALITY — adjust in Settings`); }
@@ -2358,11 +2350,13 @@ function initialQuality() {
   const touch = matchMedia('(pointer: coarse)').matches || navigator.maxTouchPoints > 1;
   const cores = navigator.hardwareConcurrency || 4;
   const mem = navigator.deviceMemory || 4;
-  if (!touch) return 'high';
+  if (!touch) return 'balanced';
   return (cores <= 4 || mem <= 3) ? 'battery' : 'balanced';
 }
 function applyQuality(name) {
-  QL = QUALITY[name] || QUALITY.high;
+  QL = QUALITY[name] || QUALITY.balanced;
+  if (effects.length > QL.effects) effects.length = QL.effects;
+  configureGore();
   resize();
 }
 
@@ -2370,6 +2364,8 @@ function update(dt) {
   pStart('update');
   G.time += dt;
   G.frameN++;
+  G.partsThisFrame = 0;
+  gore.update(dt);
   updateExpedition(dt);
   const m = G.mods;
 
@@ -2402,16 +2398,8 @@ function update(dt) {
   tickTimers(dt);
   tickSoul(dt);
   tickCombo(dt);
-  // contextual coaching, fired once each, ever
-  if (G.time > 2) coach('move');
-  if (G.dashCd <= 0 && G.time > 12 && G.dashes === 0) coach('dash');
-  if (allies.length >= 1) coach('ally');
-  if (chests.length) coach('chest');
-  for (const e of enemies) { if (e.alive && e.elite) { coach('elite'); break; } }
   buildHash();
   runActBeats();
-  updateBiome(dt);
-  updateTide(dt);
   spawnWave(dt);
   updateEnemies(dt);
   if (G.over) { pEnd(); return; }
@@ -2463,69 +2451,6 @@ function update(dt) {
 
   updateHud(dt);
   pEnd();
-}
-
-// ================================================================
-// BIOME MECHANICS
-// The three biomes were a palette swap and a music track. Each now changes one
-// rule, so "every run should feel different" is true of the ground you fight on.
-// ================================================================
-function updateBiome(dt) {
-  if (G.biome === 'jungle' || G.biome === 'land') {
-    // JUNGLE: dense growth slows the horde but not you — rewards using cover
-    G.biomeTick = (G.biomeTick || 0) - dt;
-    if (G.biomeTick <= 0) {
-      G.biomeTick = 0.3;
-      const B = DECOR_CELL;
-      for (const e of (G.visBuf || [])) {
-        const cell = decorGrid.get(((e.x / B) | 0) * 4096 + ((e.y / B) | 0));
-        if (!cell) continue;
-        for (let i = 0; i < cell.length; i += 3) {
-          const d = cell[i];
-          if ((d.x - e.x) ** 2 + (d.y - e.y) ** 2 < 2600) { e.slowT = Math.max(e.slowT, 0.35); break; }
-        }
-      }
-    }
-  } else if (G.biome === 'sea') {
-    // SEA: periodic tide surges shove everything one way — repositioning is
-    // taken out of your hands for a moment, and you plan around it
-    G.surgeT = (G.surgeT || 14) - dt;
-    if (G.surgeT <= 0) {
-      G.surgeT = 16 + Math.random() * 6;
-      G.tideDir = Math.random() * 6.283;
-      G.tidePush = 1.6;
-      banner('🌊 THE TIDE SURGES');
-      Sound.sfx.surge();
-    }
-    if (G.tidePush > 0) {
-      G.tidePush -= dt;
-      const px = Math.cos(G.tideDir) * 130 * dt, py = Math.sin(G.tideDir) * 130 * dt;
-      player.x = clampW(player.x + px); player.y = clampW(player.y + py);
-      for (const e of (G.visBuf || [])) { e.x += px * 1.4; e.y += py * 1.4; }
-    }
-  } else if (G.biome === 'sky') {
-    // SKY: a steady wind drifts projectiles, so aiming leads differently
-    G.windAng = (G.windAng || 0) + dt * 0.12;
-    G.windX = Math.cos(G.windAng) * 42; G.windY = Math.sin(G.windAng) * 42;
-  }
-}
-
-// Cataclysm's rule: a rising tide sweeps the island and must be outrun.
-function updateTide(dt) {
-  if (!G.diff || G.diff.rule !== 'tide') { if (!G.mut.shrink) return; }
-  if (G.mut.shrink) {
-    G.safeR = Math.max(900, (G.safeR || 2600) - 14 * dt);
-    const d = Math.hypot(player.x - WORLD / 2, player.y - WORLD / 2);
-    if (d > G.safeR) { G.tideTick = (G.tideTick || 0) - dt; if (G.tideTick <= 0) { G.tideTick = 0.5; hurtPlayer(14 * (G.diff.edmg || 1), 'the closing tide'); } }
-  }
-  if (G.diff.rule === 'tide') {
-    G.tideY = (G.tideY == null ? -400 : G.tideY) + 22 * dt;
-    if (G.tideY > WORLD + 400) G.tideY = -400;
-    if (Math.abs(player.y - G.tideY) < 90) {
-      G.tideTick2 = (G.tideTick2 || 0) - dt;
-      if (G.tideTick2 <= 0) { G.tideTick2 = 0.45; hurtPlayer(18 * G.diff.edmg, 'the Tide'); }
-    }
-  }
 }
 
 // The Mirror mutator: a dark copy of your Guardian hunts you across the island.
@@ -2622,6 +2547,8 @@ function render(dt) {
     for (let ty = y0; ty < camY + vh; ty += ts)
       ctx.drawImage(tile, tx, ty);
 
+  gore.drawGround(ctx, camX, camY, vw, vh);
+
   // world edge: a real coastline band rather than a stroked rectangle
   drawCoast(camX, camY, vw, vh);
 
@@ -2714,22 +2641,6 @@ function render(dt) {
       ctx.fillStyle = '#ffd54f'; ctx.font = 'bold 11px "Trebuchet MS",sans-serif'; ctx.textAlign = 'center';
       ctx.fillText('★', c.x, c.y - 34 + bob);
     }
-  }
-
-  // ---- corpses (death animation — enemies used to simply vanish) ----
-  for (const c of corpses) {
-    if (!onScreen(c.x, c.y, 90)) continue;
-    const p = c.t / c.dur, spr = Sprites.get(c.spr);
-    if (!spr) continue;
-    const h = c.dh * c.scale, w2 = spr.width / spr.height * h;
-    ctx.save();
-    ctx.globalAlpha = 1 - p;
-    ctx.translate(c.x, c.y - h * 0.45);
-    ctx.rotate(c.rot * p);
-    ctx.scale(1 + p * 0.5, 1 - p * 0.55);
-    ctx.drawImage(spr, -w2 / 2, -h / 2, w2, h);
-    ctx.restore();
-    ctx.globalAlpha = 1;
   }
 
   // ---- cages ----
@@ -3067,11 +2978,14 @@ function render(dt) {
   drawBoss(G.boss);
   drawBoss(G.boss2);
 
+  gore.drawAir(ctx, onScreen);
+
   pEnd(); pStart('projs');
   // ---- projectiles: oriented, per-archetype sprites with trails ----
   for (const p of projs) {
     if (!p.alive || !onScreen(p.x, p.y, 40)) continue;
-    const col = p.rainbow ? `hsl(${((G.time * 240 + p.x) | 0) % 360},95%,65%)` : p.color;
+    // Twelve cached rainbow colours, rather than a new sprite hue each frame.
+    const col = p.rainbow ? `hsl(${Math.floor(((G.time * 240 + p.x) % 360) / 30) * 30},95%,65%)` : p.color;
     if (p.trail && p.trail.length >= 4) {
       ctx.strokeStyle = col; ctx.lineWidth = p.size * 0.9; ctx.lineCap = 'round';
       ctx.globalAlpha = 0.28;
@@ -3101,52 +3015,21 @@ function render(dt) {
   pEnd(); pStart('effects');
   // ---- effects ----
   for (const fx of effects) {
-    const p = 1 - fx.t / fx.dur;
+    if (fx.t < 0) continue;
+    if (fx.type === 'chain' ? !fx.pts.some(pt => onScreen(pt.x, pt.y, 120)) :
+      !onScreen(fx.f ? fx.f.x : fx.x, fx.f ? fx.f.y : fx.y, Math.max(100, fx.r || fx.len || 100))) continue;
+    const p = Math.max(0, 1 - fx.t / fx.dur);
     ctx.globalAlpha = p;
     if (fx.type === 'chain') {
-      // jagged bolt with forked branches and a flash at every node, rather than
-      // one thin polyline
-      const seg = (x0, y0, x1, y1, w, col) => {
-        ctx.strokeStyle = col; ctx.lineWidth = w; ctx.lineJoin = 'round';
-        ctx.beginPath(); ctx.moveTo(x0, y0);
-        const n = 4;
-        for (let s = 1; s < n; s++) {
-          const t = s / n;
-          ctx.lineTo(x0 + (x1 - x0) * t + (Math.random() - 0.5) * 16,
-                     y0 + (y1 - y0) * t + (Math.random() - 0.5) * 16);
-        }
-        ctx.lineTo(x1, y1); ctx.stroke();
-      };
-      for (let i = 1; i < fx.pts.length; i++) {
-        const a = fx.pts[i - 1], b2 = fx.pts[i];
-        const ay = i === 1 ? a.y - 14 : a.y;
-        seg(a.x, ay, b2.x, b2.y, 7 * p, `rgba(255,255,255,${p * 0.35})`);   // outer glow
-        seg(a.x, ay, b2.x, b2.y, 2.5 * p, fx.color);                         // core
-        if (Math.random() < 0.6) {                                           // fork
-          const fa = Math.atan2(b2.y - ay, b2.x - a.x) + (Math.random() - 0.5) * 1.6;
-          seg(b2.x, b2.y, b2.x + Math.cos(fa) * 26, b2.y + Math.sin(fa) * 26, 1.6 * p, fx.color);
-        }
-      }
-      for (let i = 1; i < fx.pts.length; i++) {
-        const n = 13 * p;
-        ctx.globalAlpha = p * 0.8;
-        ctx.drawImage(Sprites.get('glowW'), fx.pts[i].x - n, fx.pts[i].y - n, n * 2, n * 2);
-        ctx.globalAlpha = p;
-      }
+      ctx.strokeStyle = fx.color; ctx.lineWidth = 2.5 * p; ctx.lineJoin = 'round';
+      ctx.beginPath();
+      fx.pts.forEach((pt, i) => { if (i) ctx.lineTo(pt.x, pt.y); else ctx.moveTo(pt.x, pt.y - 14); });
+      ctx.stroke();
     } else if (fx.type === 'beam') {
-      // layered: wide soft glow, solid core, white centre, plus an impact burst
-      // at the far end so the beam terminates on something
       const ex = fx.x + Math.cos(fx.ang) * fx.len, ey = fx.y - 12 + Math.sin(fx.ang) * fx.len;
-      ctx.lineCap = 'round';
-      ctx.globalAlpha = p * 0.28; ctx.strokeStyle = fx.color; ctx.lineWidth = fx.wid * 2.6;
+      ctx.lineCap = 'round'; ctx.strokeStyle = fx.color; ctx.lineWidth = fx.wid;
       ctx.beginPath(); ctx.moveTo(fx.x, fx.y - 12); ctx.lineTo(ex, ey); ctx.stroke();
-      ctx.globalAlpha = p; ctx.lineWidth = fx.wid * (0.6 + p * 0.4);
-      ctx.beginPath(); ctx.moveTo(fx.x, fx.y - 12); ctx.lineTo(ex, ey); ctx.stroke();
-      ctx.strokeStyle = '#fff'; ctx.lineWidth = Math.max(1.5, fx.wid * 0.3 * p);
-      ctx.beginPath(); ctx.moveTo(fx.x, fx.y - 12); ctx.lineTo(ex, ey); ctx.stroke();
-      const bs = 30 * p;
-      ctx.globalAlpha = p * 0.9;
-      ctx.drawImage(Sprites.blast(fx.color), ex - bs, ey - bs, bs * 2, bs * 2);
+      ctx.strokeStyle = '#fff3ce'; ctx.lineWidth = Math.max(1, fx.wid * 0.25); ctx.stroke();
     } else if (fx.type === 'slash') {
       // A tapered swoosh with a white-hot leading edge, swept through the arc,
       // instead of a uniform stroked arc segment.
@@ -3162,29 +3045,19 @@ function render(dt) {
       ctx.drawImage(spr, -96 * s, -96 * s, 192 * s, 192 * s);
       ctx.restore();
     } else if (fx.type === 'explo') {
-      // three layers: white-hot core, expanding shock ring, drifting smoke
+      // One small cached blast sprite and a thin radius ring. No drifting
+      // smoke, stacked glow textures or full-screen explosion light pass.
       const prog = fx.t / fx.dur;
-      const core = fx.r * (0.55 + prog * 0.75);
-      ctx.globalAlpha = p * p;
-      const bs = Sprites.blast(fx.color);
-      ctx.drawImage(bs, fx.x - core, fx.y - core, core * 2, core * 2);
-      const rr = fx.r * (0.6 + prog * 1.35);
-      ctx.globalAlpha = p * 0.85;
-      const rs = Sprites.ring(fx.color);
-      ctx.drawImage(rs, fx.x - rr, fx.y - rr, rr * 2, rr * 2);
-      if (QL.trails) {
-        ctx.globalAlpha = p * 0.35;
-        const sm = Sprites.smoke(), ss = fx.r * (0.7 + prog * 0.9);
-        ctx.drawImage(sm, fx.x - ss, fx.y - ss - prog * 14, ss * 2, ss * 2);
+      if (prog < 0.65) {
+        const r = fx.r * (0.4 + prog * 0.7);
+        ctx.globalAlpha = p * 0.75;
+        ctx.drawImage(Sprites.blast(fx.color), fx.x - r, fx.y - r, r * 2, r * 2);
       }
+      ctx.globalAlpha = p * 0.7; ctx.strokeStyle = fx.color; ctx.lineWidth = 2 + 5 * p;
+      ctx.beginPath(); ctx.arc(fx.x, fx.y, fx.r * (0.35 + prog * 0.85), 0, 7); ctx.stroke();
     } else if (fx.type === 'shock') {
-      const prog = fx.t / fx.dur;
-      const pr = fx.r * prog;
-      ctx.globalAlpha = p * 0.9;
-      const rs = Sprites.ring(fx.color);
-      ctx.drawImage(rs, fx.x - pr, fx.y - pr, pr * 2, pr * 2);
-      ctx.globalAlpha = p * 0.55; ctx.strokeStyle = '#fff'; ctx.lineWidth = 2.5;
-      ctx.beginPath(); ctx.arc(fx.x, fx.y, pr, 0, 7); ctx.stroke();
+      ctx.strokeStyle = fx.color; ctx.lineWidth = 2 + 4 * p;
+      ctx.beginPath(); ctx.arc(fx.x, fx.y, fx.r * (fx.t / fx.dur), 0, 7); ctx.stroke();
     } else if (fx.type === 'muzzle') {
       const spr = Sprites.muzzle(fx.color);
       ctx.save();
@@ -3259,18 +3132,15 @@ function render(dt) {
 
   pEnd(); pStart('parts');
   // ---- particles: spark / puff / shard / ring, not untextured squares ----
-  const glowW = Sprites.get('glowW');
   for (const p of parts) {
     if (!p.alive) continue;
     if (!onScreen(p.x, p.y, 30)) continue;
     const a = 1 - p.t / p.dur;
     ctx.globalAlpha = a;
     if (p.kind === 'puff') {
-      ctx.globalCompositeOperation = 'lighter';
-      const s = p.size * (3 + p.t * 22);
-      ctx.globalAlpha = a * 0.5;
-      ctx.drawImage(glowW, p.x - s / 2, p.y - s / 2, s, s);
-      ctx.globalCompositeOperation = 'source-over';
+      ctx.fillStyle = p.color; ctx.globalAlpha = a * 0.4;
+      const s = p.size * (1 + p.t * 3);
+      ctx.fillRect(p.x - s / 2, p.y - s / 2, s, s);
     } else if (p.kind === 'shard') {
       ctx.save();
       ctx.translate(p.x, p.y); ctx.rotate(p.rot + p.spin * p.t);
@@ -3289,10 +3159,6 @@ function render(dt) {
     }
   }
   ctx.globalAlpha = 1;
-
-  pEnd(); pStart('light');
-  // ---- lighting: ambient shade + coloured emitters ----
-  if (QL.light) { gatherLights(onScreen); drawLightLayer(camX, camY, zs); }
 
   pEnd(); pStart('floaters');
   // ---- floaters ----
@@ -3419,141 +3285,6 @@ function drawCoast(camX, camY, vw, vh) {
   const surf = Math.sin(G.time * 1.6) * 7;
   ctx.strokeRect(-84 + surf, -84 + surf, WORLD + 168 - surf * 2, WORLD + 168 - surf * 2);
   ctx.restore();
-}
-
-// ================================================================
-// LIGHTING
-// The previous pass was a single additive white glow, which washes out against
-// a fully-lit world — additive light only reads if something darkens the scene
-// first. This is a two-part model: an ambient MULTIPLY tint that shades the
-// world by biome and by how far into the run you are, then coloured additive
-// emitters punched through it. The ambient darkening also doubles as a clock:
-// the island dims as King Glob approaches.
-// ================================================================
-const AMBIENT = {
-  land: { day: [255, 252, 236], dusk: [120, 116, 168], night: [58, 62, 112] },
-  sea:  { day: [238, 250, 255], dusk: [104, 130, 176], night: [40, 66, 108] },
-  sky:  { day: [255, 244, 252], dusk: [150, 122, 190], night: [72, 54, 122] },
-};
-// 0 = full day, 1 = full night. Ramps across the run and deepens for a boss.
-// Capped well short of 1: "colour = danger" is the game's primary information
-// channel, so the world may get moody but enemy tiers must stay readable.
-const AMBIENT_MAX = 0.62;
-function ambientPhase() {
-  if (prefs.dayNight === 0) return 0;
-  const t = Math.min(1, G.time / Math.max(60, G.nextBossAt));
-  const base = Math.pow(t, 1.3) * 0.52;
-  const bossDark = (G.boss && G.boss.alive) ? 0.18 : 0;
-  return Math.min(AMBIENT_MAX, base + bossDark) * ((prefs.dayNight == null ? 100 : prefs.dayNight) / 100);
-}
-function ambientColor() {
-  const A = AMBIENT[G.biome] || AMBIENT.land;
-  const p = ambientPhase();
-  const lerp = (a, b, k) => a + (b - a) * k;
-  let from = A.day, to = A.dusk, k = p / 0.55;
-  if (p > 0.55) { from = A.dusk; to = A.night; k = (p - 0.55) / 0.45; }
-  k = Math.max(0, Math.min(1, k));
-  return [lerp(from[0], to[0], k) | 0, lerp(from[1], to[1], k) | 0, lerp(from[2], to[2], k) | 0];
-}
-
-// Emitters are collected during the world pass, then drawn in one batch.
-let lights = [], lightN = 0;
-function emitLight(x, y, r, color, a) {
-  if (!QL.light || lightN >= LIGHT_CAP) return;
-  const L = lights[lightN] || (lights[lightN] = {});
-  L.x = x; L.y = y; L.r = r; L.c = color; L.a = a;
-  lightN++;
-}
-
-// Single-pass LIGHT MAP.
-// The previous version did two full-screen operations: an ambient `multiply`
-// fill, then an additive composite of the light buffer. Full-screen fills are
-// the dominant frame cost on a phone, so this builds one buffer that already
-// contains both — clear to the ambient colour, add the emitters into it, then
-// composite once with `multiply`. Unlit ground is tinted and darkened; lit
-// areas multiply by ~white and come back to their true colour instead of
-// blowing out. Half the fill cost and it looks better.
-function drawLightLayer(camX, camY, zs) {
-  const p = ambientPhase();
-  // In bright daylight with nothing dramatic on screen the map is a no-op —
-  // skip the entire pass rather than multiplying by white.
-  if (p < 0.06 && lightN === 0) { lightN = 0; return; }
-
-  const L = lightCtx, k = LIGHT_SCALE;
-  const [ar, ag, ab] = ambientColor();
-  L.setTransform(1, 0, 0, 1, 0, 0);
-  L.globalCompositeOperation = 'source-over';
-  L.fillStyle = `rgb(${ar},${ag},${ab})`;
-  L.fillRect(0, 0, lightCv.width, lightCv.height);
-
-  L.setTransform(zs * k, 0, 0, zs * k, -camX * zs * k, -camY * zs * k);
-  L.globalCompositeOperation = 'lighter';
-  const boost = 0.55 + p * 0.85;
-  for (let i = 0; i < lightN; i++) {
-    const e = lights[i];
-    L.globalAlpha = Math.min(1, e.a * boost);
-    L.drawImage(Sprites.light(e.c), e.x - e.r, e.y - e.r, e.r * 2, e.r * 2);
-  }
-  L.globalAlpha = 1;
-  L.globalCompositeOperation = 'source-over';
-
-  ctx.save();
-  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  // The single most important line in the renderer. Compositing the light
-  // buffer full-screen WITH smoothing costs ~21ms on a throttled device — the
-  // entire frame budget, for one operation. Bilinear-filtering a million pixels
-  // is the whole cost. With smoothing off it is ~4.6ms, a 4.6x win, and a light
-  // map is nothing but smooth gradients so nearest-neighbour upscaling of it is
-  // visually indistinguishable.
-  ctx.imageSmoothingEnabled = false;
-  ctx.globalCompositeOperation = 'multiply';
-  ctx.drawImage(lightCv, 0, 0, cw, ch);
-  ctx.globalCompositeOperation = 'source-over';
-  ctx.imageSmoothingEnabled = true;
-  ctx.restore();
-  lightN = 0;
-}
-
-// Collect the frame's emitters. Kept separate from drawing so the world pass
-// can add one-off lights (explosions, muzzle flashes) as it goes.
-function gatherLights(onScreen) {
-  if (!QL.light) return;
-  const hero = HEROES[player.heroIdx];
-  // wide soft fill first, so the area you're actually fighting in stays legible
-  emitLight(player.x, player.y - 18, 330, '#fff3d0', 0.13 + ambientPhase() * 0.16);
-  emitLight(player.x, player.y - 18, 96, hero.accent, 0.34);
-  if (G.burnT > 0) emitLight(player.x, player.y - 18, 150, '#ffd54f', 0.3);
-  // projectiles: budgeted to the largest, so a 400-projectile screen can't
-  // make the light pass the dominant frame cost
-  let lb = 34;
-  for (let i = 0; i < MAX_PROJ && lb > 0; i++) {
-    const pr = projs[i];
-    if (!pr.alive || pr.size < 5 || !onScreen(pr.x, pr.y, 20)) continue;
-    emitLight(pr.x, pr.y, pr.size * 5.5, pr.color, 0.24); lb--;
-  }
-  for (const c of chests) emitLight(c.x, c.y, 78, '#ffd54f', 0.45);
-  for (const t of totems) emitLight(t.x, t.y - 26, 70, '#4dd0e1', 0.3);
-  for (const s of spires) emitLight(s.x, s.y - 30, 56, '#80cbc4', 0.28);
-  for (const pa of patches) emitLight(pa.x, pa.y, pa.r * 1.7, pa.color, 0.3 * Math.min(1, pa.life));
-  for (const pl of pools) if (!pl.mine) emitLight(pl.x, pl.y, pl.r * 1.5, pl.color, 0.22);
-  for (const e of (G.visBuf || [])) {
-    if (e.elite) emitLight(e.x, bodyY(e), 92, e.affix.color, 0.3);
-    else if (e.burnT > 0) emitLight(e.x, bodyY(e), 44, '#ff7043', 0.22);
-    else if (e.slowT > 0) emitLight(e.x, bodyY(e), 40, '#b3e5fc', 0.16);
-  }
-  for (const al of allies) if (al.active) emitLight(al.x, al.y - 14, 52, HEROES[al.heroIdx].accent, 0.16);
-  for (const cg of cages) if (!cg.broken && onScreen(cg.x, cg.y, 90)) emitLight(cg.x, cg.y - 10, 62, '#ffd54f', 0.26);
-  if (G.boss && G.boss.alive)
-    emitLight(G.boss.x, G.boss.y - 70, 210, G.boss.kind === 'reef' ? '#ff4081' : '#9ccc65', 0.32 + (G.boss.frenzy ? 0.15 : 0));
-  // effects contribute their own transient light
-  for (const fx of effects) {
-    const life = 1 - fx.t / fx.dur;
-    if (fx.type === 'explo') emitLight(fx.x, fx.y, fx.r * 2.4 * (1.2 - life * 0.5), fx.color, life * 0.85);
-    else if (fx.type === 'shock') emitLight(fx.x, fx.y, fx.r * (fx.t / fx.dur) * 1.4, fx.color, life * 0.5);
-    else if (fx.type === 'bolt') emitLight(fx.x, fx.y, 190, fx.color, life * 0.8);
-    else if (fx.type === 'muzzle') emitLight(fx.x, fx.y, 70, fx.color, life * 0.6);
-    else if (fx.type === 'tierup') emitLight(fx.f.x, fx.f.y - 12, 130, fx.color, life * 0.6);
-  }
 }
 
 // A LOCAL radar, not a whole-world map. The old version squeezed 5200px into
@@ -3687,31 +3418,12 @@ function updateHudCounts() {
   $('freed').textContent = `⛓ ${freedSet.size}/24`;
 }
 
-// Banners queue instead of overwriting each other, so a tier-up right after
-// a cage break still gets read. Spam beyond 4 drops the oldest.
-let bannerQ = [], bannerNext = 0, bannerHide = null, bannerPump = null;
+// Optional reading in Pause; combat announcements never cover the playfield.
 function banner(txt) {
-  if (bannerQ.length > 3) bannerQ.shift();
-  bannerQ.push(txt);
-  pumpBanner();
-}
-function pumpBanner() {
-  if (bannerPump) return;
-  bannerPump = setTimeout(() => {
-    bannerPump = null;
-    const txt = bannerQ.shift();
-    if (txt === undefined) return;
-    const b = $('banner');
-    b.textContent = txt;
-    b.classList.remove('hidden');
-    b.style.animation = 'none';
-    void b.offsetWidth;
-    b.style.animation = '';
-    bannerNext = performance.now() + 1500;
-    clearTimeout(bannerHide);
-    bannerHide = setTimeout(() => b.classList.add('hidden'), 2600);
-    if (bannerQ.length) pumpBanner();
-  }, Math.max(0, bannerNext - performance.now()));
+  const log = G.notices || (G.notices = []);
+  if (log[log.length - 1] === txt) return;
+  if (log.length >= 6) log.shift();
+  log.push(txt);
 }
 
 // ---------------- Facecard strip & possession ----------------
@@ -3850,7 +3562,7 @@ function possess(idx) {
   spawnParts(player.x, player.y, '#ffd54f', 18, 180, 'spark');
   spawnParts(player.x, player.y, '#fff', 6, 110, 'puff');
   spawnParts(al.x, al.y, '#b39ddb', 10, 130, 'spark');
-  effects.push({ type: 'shock', x: player.x, y: player.y, r: 120, t: 0, dur: 0.4, color: HEROES[idx].accent });
+  addEffect({ type: 'shock', x: player.x, y: player.y, r: 120, t: 0, dur: 0.4, color: HEROES[idx].accent });
   // Resonance: swapping into an already-mastered Guardian buffs the whole squad
   const tier = heroState[idx] ? heroState[idx].tier : 0;
   if (tier >= 2) { G.resonance = Math.min(5, (G.resonance || 0) + 1); banner(`✦ RESONANCE ×${G.resonance}`); }
@@ -3907,14 +3619,13 @@ function powershot() {
   eachEnemyNear(player.x, player.y, R + 40, e => {
     if ((e.x - player.x) ** 2 + (bodyY(e) - player.y) ** 2 < (R + e.r) ** 2) {
       const wasAlive = e.alive;
-      damageEnemy(e, base * 6 * mul, { knock: 520, kx: e.x - player.x, ky: e.y - player.y, src: idx, fromX: player.x, fromY: player.y });
+      damageEnemy(e, base * 6 * mul, { knock: 520, kx: e.x - player.x, ky: e.y - player.y, src: idx, fromX: player.x, fromY: player.y, blast: true });
       if (wasAlive && !e.alive) killed++;
     }
   });
   G.bestPowershot = Math.max(G.bestPowershot || 0, killed);
-  if (killed >= 15) slowMo(0.3, 0.55);   // a screen-clearing blast earns a beat
   if (G.boss && G.boss.alive && (G.boss.x - player.x) ** 2 + (G.boss.y - player.y) ** 2 < (R + G.boss.r) ** 2)
-    damageBoss(base * 8 * mul, { src: idx });
+    damageBoss(base * 8 * mul, { src: idx, blast: true, fromX: player.x, fromY: player.y });
   for (const c of cages) {
     if (!c.broken && (c.x - player.x) ** 2 + (c.y - player.y) ** 2 < (R + 30) ** 2) damageCage(c, base * 6 * mul);
   }
@@ -3929,10 +3640,9 @@ function powershot() {
     }
   }
 
-  effects.push({ type: 'shock', x: player.x, y: player.y, r: R, t: 0, dur: 0.5, color: hero.accent });
+  addEffect({ type: 'shock', x: player.x, y: player.y, r: R, t: 0, dur: 0.5, color: hero.accent });
   spawnParts(player.x, player.y, hero.accent, 26, 260, 'spark');
-  G.flash = prefs.flash === 0 ? 0.12 : 0.4 * ((prefs.flash == null ? 100 : prefs.flash) / 100);
-  hitStop(0.08);   // brief punch of weight as the shockwave lands
+  G.flash = 0.22 * ((prefs.flash == null ? 25 : prefs.flash) / 100);
   shakeAt(player.x, player.y - 1, 13);
   player.iv = Math.max(player.iv, 1.2);
   Sound.sfx.powershot();
@@ -4368,8 +4078,6 @@ function newGame(heroIdx, diffIdx, daily) {
   G.session = Expedition.create(selectedMode, selectedRoute, selectedBlessing, daily);
   const sessionMode = Expedition.mode(G.session.mode);
   G.draftBusy = false; G.runToken = (G.runToken || 0) + 1;
-  clearTimeout(bannerPump); clearTimeout(bannerHide); bannerPump = null; bannerHide = null; bannerNext = 0;
-  $('banner').classList.add('hidden');
   G.goldCd = 55; G.lastBrink = -99; G.coachOpen = 0; G.trailAcc = 0;
   G.shellsEarned = 0; G.newAch = []; G.newUnlocks = [];
   for (const key of Object.keys(hudCache)) delete hudCache[key];
@@ -4377,7 +4085,6 @@ function newGame(heroIdx, diffIdx, daily) {
   for (const key of Object.keys(keys)) keys[key] = false;
   joyMove.active = false; joyMove.id = null; joyMove.dx = 0; joyMove.dy = 0;
   ['screen-title', 'screen-story', 'screen-roster', 'screen-modal', 'screen-levelup', 'screen-chest', 'screen-mutator'].forEach(id => $(id).classList.add('hidden'));
-  $('coach').classList.add('hidden');
   G.running = true; G.over = false; G.victory = false; G.pendingLv = 0;
   G.time = 0; G.kills = 0; G.level = 1; G.xp = 0; G.xpNext = 16;
   G.spawnAcc = 0; G.boss = null; G.bossWarned = false; G.shake = 0; G.hitStop = 0;
@@ -4394,13 +4101,14 @@ function newGame(heroIdx, diffIdx, daily) {
   G.upTaken = {}; G.plagueOn = 0; G.shatterOn = 0; G.lastHurtBy = 'the horde';
   G.mut = { eHp: 1, eSpd: 1, xp: 1, spawn: 1, bHp: 1, allyRate: 1, playerDmgTaken: 1 };
   G.mutTaken = {}; G.mutScore = 0; G.mutList = [];
-  G.safeR = 2600; G.tideY = null; G.mirror = null; G.surgeWarn = null;
+  G.mirror = null; G.surgeWarn = null; G.notices = []; G.partsThisFrame = 0;
   // Seeded runs: layout, biome and decor come from a short shareable code, so a
   // friend can play your exact island. The daily already did this; every run
   // now does, which also makes bugs reproducible.
   G.seed = (daily ? dayKey().replace(/-/g, '').slice(2) : (pendingSeed || makeSeed()));
   pendingSeed = null;
   G.rng = mulberry32(seedToInt(G.seed));
+  configureGore(); gore.reset(seedToInt(G.seed));
   G.daily = daily || null;
   G.diff = DIFFICULTIES[Math.max(0, Math.min(DIFFICULTIES.length - 1, diffIdx | 0))];
   G.startHero = heroIdx;
@@ -4411,7 +4119,7 @@ function newGame(heroIdx, diffIdx, daily) {
   heroState = HEROES.map(() => ({ dmg: 0, tier: 0, charge: 0, kills: 0, control: 0 }));
   heroMods = HEROES.map(freshHeroMod);
   powerWaves = []; relics = []; timers = []; overlayQ = [];
-  chests = []; corpses = []; pools = []; ghosts = []; spires = []; totems = [];
+  chests = []; pools = []; ghosts = []; spires = []; totems = [];
   G.mods = {
     dmg: 1, rate: 1, spd: 1, hpBonus: 0, ally: 1, magnet: 1, regen: 0, area: 1,
     pierceBonus: 0, pspd: 1, plife: 1, chargeMul: 1, xpGain: 1, knockMul: 1, revive: 0,
@@ -4511,12 +4219,10 @@ function newGame(heroIdx, diffIdx, daily) {
   G.musicRot = 0;
   Sound.playMusic(`music/${battleTrack()}.mp3`);
   Sound.playFile(`assets/audio/heroes/${HEROES[heroIdx].id}_entrance.wav`, 0.9);
-  bannerQ.length = 0;
   banner(`${HEROES[heroIdx].name.toUpperCase()} — BREAK THE CAGES!`);
   if (G.diff.rule) banner(`◆ ${G.diff.name}: ${G.diff.ruleTxt}`);
   refreshBuildStrip();
   updateFormationBtn();
-  coachReset();
   renderContracts();
   updateExpeditionHud();
   if (!daily) {
@@ -4530,36 +4236,8 @@ function newGame(heroIdx, diffIdx, daily) {
 // Onboarding used to be two banners that scrolled past in five seconds, so most
 // players never discovered possession — the best mechanic in the game.
 // ================================================================
-const COACH = [
-  { id: 'move',    txt: 'DRAG to move · DOUBLE-TAP to DASH', sub: 'the other side of the screen fires your powershot' },
-  { id: 'cage',    txt: 'A CAGED GUARDIAN', sub: 'shoot the cage — the gold arrow points to the nearest one' },
-  { id: 'ally',    txt: 'TAP THEIR CARD TO BECOME THEM', sub: 'possession costs ✦ Soul and grants a 3s Soulburn' },
-  { id: 'power',   txt: 'POWERSHOT READY ⚡', sub: 'tap the glowing power button or press Space' },
-  { id: 'gold',    txt: 'GOLD MEANS DEADLY', sub: 'enemy colour tells you its power tier' },
-  { id: 'elite',   txt: 'AN ELITE', sub: 'tough, but it drops something worth having' },
-  { id: 'chest',   txt: 'A CACHE', sub: 'walk into it for several upgrades at once' },
-  { id: 'dash',    txt: 'DASH IS READY', sub: 'double-tap the movement side to dodge through anything' },
-];
-function coachReset() {
-  const save = loadSave();
-  G.coachSeen = save.coach || {};
-  G.coachQ = [];
-}
-function coach(id) {
-  if (!G.coachSeen || G.coachSeen[id] || G.coachOpen) return;
-  const c = COACH.find(c => c.id === id);
-  if (!c) return;
-  G.coachSeen[id] = 1;
-  const save = loadSave(); save.coach = G.coachSeen; saveGame(save);
-  G.coachOpen = 1;
-  const el = $('coach');
-  el.innerHTML = `<b>${c.txt}</b><span>${c.sub}</span>`;
-  el.classList.remove('hidden');
-  slowMo(0.25, 0.9);
-  Sound.sfx.uiSelect();
-  const token = G.runToken;
-  setTimeout(() => { if (G.runToken === token) { el.classList.add('hidden'); G.coachOpen = 0; } }, 2400);
-}
+// Controls are available in How to Play; automatic coaching is disabled.
+function coach() {}
 function updateFormationBtn() {
   const el = $('formation-btn');
   if (el) el.textContent = FORMATIONS[G.formation || 0].icon;
@@ -5112,7 +4790,7 @@ function bindSettings() {
     $('set-fps').value = String(prefs.fpsCap);
     $('set-shake').value = prefs.shake; $('set-shake-v').textContent = prefs.shake + '%';
     $('set-flash').value = prefs.flash; $('set-flash-v').textContent = prefs.flash + '%';
-    $('set-daynight').value = prefs.dayNight; $('set-daynight-v').textContent = prefs.dayNight + '%';
+    $('set-gore').value = prefs.gore;
     $('set-dmgnum').value = prefs.dmgnum;
     $('set-cvd').value = prefs.cvd;
     $('set-assist').checked = !!prefs.assist;
@@ -5128,7 +4806,7 @@ function bindSettings() {
   bindRange('set-deadzone', 'deadzone');
   bindRange('set-shake', 'shake');
   bindRange('set-flash', 'flash');
-  bindRange('set-daynight', 'dayNight');
+  bindSel('set-gore', 'gore');
   bindSel('set-stickside', 'stickSide');
   bindSel('set-sticktype', 'stickType');
   // Quality has to take hold the moment it's picked. Bound through the generic
@@ -5170,7 +4848,6 @@ function exportSave() {
   const data = localStorage.getItem('balitopia') || '{}';
   try {
     navigator.clipboard.writeText(data);
-    banner ? null : null;
   } catch (e) {}
   const blob = new Blob([data], { type: 'application/json' });
   const a = document.createElement('a');
@@ -5229,8 +4906,8 @@ function buildHowto() {
     <div class="ht-row"><span class="ht-ico">🎨</span><span><b>Colour = danger.</b> Six power tiers by hue: green → blue → purple → pink → orange → gold. Turn on <em>Colorblind danger pips</em> or a <em>Colour vision</em> mode in Settings for redundant cues.</span></div>
     <div class="ht-row"><span class="ht-ico">💀</span><span><b>Elites</b> carry an affix and a name tag — <em>Gilded</em> pays out, <em>Splitting</em> multiplies, <em>Volatile</em> leaves fire. Kill them for chests.</span></div>
     <div class="ht-row"><span class="ht-ico">📦</span><span><b>Caches</b> give several upgrades at once. Chase the <b>Golden One</b> if you see it run.</span></div>
-    <div class="ht-row"><span class="ht-ico">👑</span><span><b>King Glob</b> arrives at 6:00. Beat him and endless rounds begin — each one lets you draft a <b>curse</b> for bonus score, and the <b>Reef Mother</b> alternates in.</span></div>
-    <div class="ht-row"><span class="ht-ico">🏝</span><span><b>Biomes matter.</b> Jungle growth slows the horde, the sea surges and shoves everything sideways, sky winds bend your shots.</span></div>
+    <div class="ht-row"><span class="ht-ico">👑</span><span><b>King Glob</b> arrives at 6:00 in Expedition or 3:00 in Blitz. Defeat him to win. In <b>Endless</b>, bosses return, the <b>Reef Mother</b> alternates in, and each round offers a curse for bonus score.</span></div>
+    <div class="ht-row"><span class="ht-ico">🏝</span><span><b>Choose your scenery.</b> Islands keep their art and music. No tide pushes, wind drift or closing arena interrupts combat.</span></div>
     <h3>BUILDING A RUN</h3>
     <div class="ht-row"><span class="ht-ico">★</span><span><b>Level up</b> to draft an upgrade. Cards are face-up — read them. <b>Reroll</b> or <b>Skip</b> for HP if you don't like the hand.</span></div>
     <div class="ht-row"><span class="ht-ico">🗿</span><span><b>Relics</b> are your second weapon slot (two max, four levels each). They're hero-agnostic, so the same relic plays differently on every Guardian — this is where build variety lives.</span></div>
@@ -5363,7 +5040,7 @@ const confirmModal = (title, body, onYes, yesLabel) =>
 const PREF_DEFAULTS = {
   musicVol: 80, sfxVol: 100, haptics: 1, motion: 1, colorblind: 0, uiscale: 100, minimap: 1,
   stickSide: 'left', stickType: 'float', stickSize: 100, deadzone: 0,
-  quality: 'auto', fpsCap: 60, shake: 100, flash: 100, dmgnum: 'all', cvd: 'none', assist: 0, dayNight: 100,
+  quality: 'auto', fpsCap: 60, shake: 65, flash: 25, dmgnum: 'big', cvd: 'none', assist: 0, gore: 'full',
 };
 let prefs = { ...PREF_DEFAULTS };
 function loadPrefs() {
@@ -5757,6 +5434,7 @@ function updateExpeditionHud() {
 function renderContracts() {
   if (!G.session) return;
   const el = $('run-contracts');
+  $('combat-log').textContent = (G.notices || []).join('\n');
   el.innerHTML = G.daily ? '<div class="contract"><b>Daily challenge</b><span>Fixed island · Shrine perks and blessings disabled</span></div>' :
     Expedition.progress(G.session, expeditionStats()).map(c => `<div class="contract${c.done ? ' done' : ''}">` +
       `<b>${c.done ? '★' : '☆'} ${c.name} · ${c.value}/${c.target}</b><span>${c.detail} · +${c.reward} shells</span>` +
@@ -5780,7 +5458,7 @@ function checkRelicEvolutions() {
     r.evolved = evo; r.cd = 0;
     G.session.evolved.push(evo.name); G.relicDirty = 1;
     banner(`RELIC EVOLVED · ${evo.name.toUpperCase()}`);
-    effects.push({ type: 'tierup', f: player, color: '#ffcf73', t: 0, dur: 1.2 });
+    addEffect({ type: 'tierup', f: player, color: '#ffcf73', t: 0, dur: 1.2 });
     Sound.sfx.unlock(); buzz(HAPTIC.power);
   }
 }
@@ -5828,7 +5506,8 @@ if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
 
 // debug/testing handle
 window.__balitopia = {
-  G, enemies,
+  G, enemies, gore, render, explodeAt, damageEnemy, buildHash,
+  effects: () => effects,
   update, updateRelics, updateExpedition, applyUpgrade, checkRelicEvolutions, killBoss, endGame, maxHP,
   setRunSetup: (mode, route, blessing) => { selectedMode = Expedition.mode(mode).id; selectedRoute = Expedition.route(route).id; selectedBlessing = Expedition.blessing(blessing).id; },
   player: () => player,
@@ -5851,7 +5530,7 @@ window.__balitopia = {
   applyQuality, coach, showModal, allyFalloff,
   getQL: () => QL, viewInfo: () => ({ w: Math.round(viewW), h: Math.round(viewH), mul: +viewMul.toFixed(3) }),
   setQL: q => { QL = q; resize(); },
-  prof: v => { PROF.on = v; PROF.acc = {}; PROF.n = 0; }, profData: profReport, ambientPhase, ambientColor, heroState: () => heroState,
+  prof: v => { PROF.on = v; PROF.acc = {}; PROF.n = 0; }, profData: profReport, heroState: () => heroState,
 };
 
 })();

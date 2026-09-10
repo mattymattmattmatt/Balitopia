@@ -1,6 +1,17 @@
 # Tests
 
-`npm test` runs the dependency-free expedition rules and game-simulation regression suite. It loads the real `data.js`, `expedition.js` and `game.js` inside a deterministic Node VM with no-op DOM, canvas and audio ports. This checks mechanics, save migration, UI event wiring, reward races and all 24 Guardian weapon paths. It does **not** render pixels, measure phone frame rates, or validate browser touch behaviour.
+`npm test` runs the dependency-free expedition and gore regression suites. They
+load real game rules, gore physics and the update/render paths inside a
+deterministic Node VM with no-op DOM, canvas and audio ports. Coverage includes
+save migration, UI wiring, reward races, all 24 Guardian weapon/render paths,
+mass explosions, particle and tile limits, stain seams, gore settings, retry
+cleanup and removal of environmental hazards. Gore settings must produce
+identical damage, kill credit and XP drops. These tests do **not** render pixels,
+measure phone frame rates or validate browser touch behaviour.
+
+The gore update was also inspected using native Canvas to draw the actual gore
+atlas and particle physics over the game's existing scenery. This checks the
+new art and compositing; it is separate from browser and device testing.
 
 ## Browser regression and performance tests
 

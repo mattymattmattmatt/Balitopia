@@ -3,6 +3,23 @@
 A Vampire-Survivors-style horde survival game built for **mobile phones in landscape mode**.
 No engine, no dependencies, no build step — pure HTML5 canvas. Open `index.html` and play.
 
+## Gore and smoother explosions
+
+Enemy kills now spray blood and throw bouncing chunks. Explosions launch debris
+away from the blast; blood and landed remains stain the ground. **Monster gore**
+in Settings offers Full (default), Light and Off. Reduced motion keeps ground
+stains and removes airborne debris.
+
+The renderer uses simpler blasts, beams and particles, fewer scenery props,
+and bounded visual pools. Full-screen lighting and projectile trails are removed.
+Ordinary hits and screen-clearing powershots no longer freeze or slow combat.
+Centre-screen announcements and automatic coaching are gone; recent notices
+can be read in **Pause → Recent action**.
+
+Tide pushes, projectile wind drift, the closing arena and the Ebb Tide curse
+are removed. Enemy waves, bosses and combat encounters still supply the horde.
+See [GORE_PERFORMANCE.md](GORE_PERFORMANCE.md) for budgets and verification.
+
 ## Expedition overhaul
 
 The game now opens into a redesigned Guardian and expedition flow:
@@ -80,16 +97,16 @@ damage, move speed, XP, magnet, a head-start cage, and extra level-up rerolls), 
 that unlock across runs. Every run also plays out on one of three **biomes** — jungle, sea or
 sky — each with its own ground and battle music.
 
-**Biomes change the rules**, not just the palette: jungle growth slows the horde, the sea
-**surges** and shoves everything sideways, and sky **winds** bend your projectiles.
+**Biomes set the scenery and music.** Environmental movement and damage hazards
+are disabled, so your movement and projectile paths stay under your control.
 
 **Difficulty adds rules too** — Warden thins gem drops, Nightmare removes heart drops
-entirely, and Cataclysm sends a rising **Tide** across the island that you have to outrun.
+entirely, and Cataclysm doubles the elites in its scheduled elite encounters.
 
 **⚙ Settings** cover music/SFX volume, vibration, reduced motion, colorblind pips and
 per-deficiency colour modes, UI text size, radar toggle, **control layout** (stick side, type,
 size, dead zone), **quality preset and frame cap**, screen shake and flash intensity, damage
-number density, **assist mode**, and save export/import/erase.
+number density, **monster gore**, **assist mode**, and save export/import/erase.
 
 - **Minyar** — endless, easy to squish, but they come in every size and color. Color = danger:
   green < blue < purple < pink < magma < gold.

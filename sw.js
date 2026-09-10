@@ -2,7 +2,7 @@
 // App shell (HTML/CSS/JS/sprites, ~1.3 MB) is cache-first so a second visit is
 // instant and the game works offline. Audio is stale-while-revalidate and kept
 // in a separate, size-capped cache so a 100 MB library can't evict the shell.
-const VERSION = 'v2-expedition';
+const VERSION = 'v3-gore';
 const SHELL = 'balitopia-shell-' + VERSION;
 const MEDIA = 'balitopia-media-' + VERSION;
 const MEDIA_MAX = 60;   // entries, trimmed LRU-ish on write
@@ -17,6 +17,7 @@ const SHELL_FILES = [
   './js/sprites.js',
   './js/audio.js',
   './js/expedition.js',
+  './js/gore.js',
   './js/game.js',
   './assets/img/title_vs.jpg',
   './assets/img/story_bg.jpg',

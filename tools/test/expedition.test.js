@@ -152,7 +152,7 @@ test('all 24 Guardians survive a deterministic simulation smoke test without inv
   for (let hero = 0; hero < 24; hero++) {
     const { B } = harness(); B.newGame(hero, 0);
     for (let i = 0; i < 8; i++) B.spawnEnemy('minyar', 0, B.player().x + 80 + i * 10, B.player().y);
-    for (let n = 0; n < 480; n++) { B.player().iv = 10; B.update(1/60); }
+    for (let n = 0; n < 480; n++) { B.player().iv = 10; B.update(1/60); if (n % 30 === 0) B.render(1/60); }
     assert(Number.isFinite(B.player().hp)); assert(Number.isFinite(B.G.time));
     assert(B.enemies.every(e => !e.alive || (Number.isFinite(e.hp) && Number.isFinite(e.x))));
   }

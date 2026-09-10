@@ -1,5 +1,10 @@
 # Balitopia — expedition overhaul
 
+The subsequent [gore and performance update](GORE_PERFORMANCE.md) removes
+environmental hazards and combat popups, and replaces the lighting-heavy
+effects with bounded gore and simpler blasts. This document describes the
+expedition and progression changes that preceded that update.
+
 This update gives the existing Guardian-rescue game a clearer session structure,
 a cohesive mobile interface, and deliberate build goals. It retains the existing
 24 Guardians, painted art, music, enemy behaviours, accessibility controls,

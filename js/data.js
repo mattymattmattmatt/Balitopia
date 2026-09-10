@@ -222,7 +222,6 @@ const MUTATORS = [
   { id:'bloodmoon', icon:'🌑', name:'Blood Moon',  desc:'Enemies +40% faster, −30% HP',       score:0.25, apply:m=>{ m.eSpd*=1.4; m.eHp*=0.7; } },
   { id:'famine',    icon:'🍂', name:'Famine',      desc:'No hearts drop — but +50% XP',       score:0.30, apply:m=>{ m.noHearts=1; m.xp*=1.5; } },
   { id:'static',    icon:'⚡', name:'Static',      desc:'Allies fire 2× — you take 2× damage', score:0.35, apply:m=>{ m.allyRate*=0.5; m.playerDmgTaken*=2; } },
-  { id:'ebbtide',   icon:'🌊', name:'Ebb Tide',    desc:'The island shrinks around you',      score:0.30, apply:m=>{ m.shrink=1; } },
   { id:'swarm',     icon:'🐝', name:'Swarm',       desc:'Double spawns, quarter HP',          score:0.25, apply:m=>{ m.spawn*=2; m.eHp*=0.25; } },
   { id:'mirror',    icon:'🪞', name:'Mirror',      desc:'A dark copy of you hunts the island', score:0.40, apply:m=>{ m.mirror=1; } },
   { id:'brittle',   icon:'💠', name:'Brittle',     desc:'Everything dies faster — including you', score:0.30, apply:m=>{ m.eHp*=0.55; m.playerDmgTaken*=1.6; } },
@@ -242,7 +241,7 @@ const DIFFICULTIES = [
   { id:2, name:'NIGHTMARE', sub:'no mercy on the sand',ehp:2.10, edmg:1.65, bhp:2.6,  menace:1.30, score:2.4, color:'#f44336',
     rule:'noheart',ruleTxt:'No Mercy — hearts no longer drop. Heal from cages and choices.' },
   { id:3, name:'CATACLYSM', sub:'the island screams',  ehp:3.10, edmg:2.05, bhp:4.0,  menace:1.5,  score:3.5, color:'#ff9800',
-    rule:'tide',   ruleTxt:'The Tide — a rising line sweeps the island. Outrun it. Elites twice as often.' },
+    rule:'elites', ruleTxt:'Elite Assault — twice as many elites. No environmental hazards.' },
 ];
 
 // ---------- Guardian mastery & powershots ----------
