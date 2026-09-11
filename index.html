@@ -55,8 +55,6 @@
   <div id="facecard-strip"></div>
   <button id="dash-btn" aria-label="Dash"><span>⟫</span><i id="dash-fill"></i><small>DASH</small></button>
   <button id="ps-btn" aria-label="Powershot"><span>ϟ</span><i id="ps-fill"></i><small>POWER</small></button>
-  <div id="banner" class="hidden"></div>
-  <div id="coach" class="hidden"></div>
 </div>
 
 <!-- ===== Title (VS key art + menu) ===== -->
@@ -118,7 +116,8 @@
       <select id="set-fps"><option value="60">60 fps</option><option value="45">45 fps</option><option value="30">30 fps (battery)</option></select></label>
     <label class="set-row"><span>Screen shake</span><input type="range" id="set-shake" min="0" max="150" step="10"><b id="set-shake-v"></b></label>
     <label class="set-row"><span>Screen flash</span><input type="range" id="set-flash" min="0" max="100" step="10"><b id="set-flash-v"></b></label>
-    <label class="set-row"><span>Dynamic lighting</span><input type="range" id="set-daynight" min="0" max="100" step="10"><b id="set-daynight-v"></b></label>
+    <label class="set-row"><span>Monster gore</span>
+      <select id="set-gore"><option value="full">Full — blood &amp; chunks</option><option value="light">Light — fewer chunks</option><option value="off">Off</option></select></label>
     <label class="set-row"><span>Damage numbers</span>
       <select id="set-dmgnum"><option value="all">All</option><option value="big">Big only</option><option value="off">Off</option></select></label>
     <label class="set-row"><span>Colour vision</span>
@@ -198,6 +197,7 @@
   <h2 class="select-title">GUARDIANS</h2>
   <p class="select-sub">Tap a freed Guardian to possess them — costs ✦ Soul, grants a 3s Soulburn</p>
   <div id="run-contracts"></div>
+  <details id="combat-notices"><summary>Recent action</summary><p id="combat-log"></p></details>
   <div id="roster-build"></div>
   <div id="roster-grid"></div>
   <div id="roster-btns">
@@ -272,6 +272,7 @@
 <script src="js/sprites.js"></script>
 <script src="js/audio.js"></script>
 <script src="js/expedition.js"></script>
+<script src="js/gore.js"></script>
 <script src="js/game.js"></script>
 </body>
 </html>

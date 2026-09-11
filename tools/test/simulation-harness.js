@@ -81,11 +81,14 @@ function harness(saved = {}) {
     URL, URLSearchParams, Blob, Uint8ClampedArray, Math: testMath, Sound: sound,
     Sprites: { init: () => ({ then: fn => { boot = fn; return { catch: noop }; } }),
       portrait: () => new Element('canvas'), get: () => ({ width: 96, height: 96 }),
-      light: () => new Element('canvas') },
+      light: () => new Element('canvas'), shade: color => color,
+      proj: () => new Element('canvas'), blast: () => new Element('canvas'),
+      ring: () => new Element('canvas'), slash: () => new Element('canvas'),
+      muzzle: () => new Element('canvas'), statusFx: () => new Element('canvas') },
   };
   sandbox.window = sandbox;
   vm.createContext(sandbox);
-  for (const file of ['js/data.js', 'js/expedition.js', 'js/game.js'])
+  for (const file of ['js/data.js', 'js/expedition.js', 'js/gore.js', 'js/game.js'])
     vm.runInContext(fs.readFileSync(path.join(root, file), 'utf8'), sandbox, { filename: file });
   function advance(ms) {
     const end = now + ms;

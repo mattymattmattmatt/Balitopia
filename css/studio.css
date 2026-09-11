@@ -116,9 +116,9 @@ button:disabled { cursor:default; opacity:.45; }
 #dash-btn small, #ps-btn small { position:absolute; left:50%; transform:translateX(-50%); bottom:-20px; font-size:12px; font-weight:800; letter-spacing:.04em; color:#fff; text-shadow:0 1px 4px #000; }
 .facecard { border-radius:10px; box-shadow:0 3px 12px #0005; }
 #banner { top:27%; max-width:70vw; font-size:clamp(16px,3.4vh,26px); padding:10px 18px; border:1px solid #ffffff35; background:#092c35ed; border-radius:10px; box-shadow:0 6px 30px #0004; }
-#coach { max-width:65vw; border:1px solid #ffffff35; background:#0b2831ed; border-radius:10px; }
-#coach b { font-size:16px; letter-spacing:.03em; }
-#coach span { font-size:13px; }
+#combat-notices { width:min(900px,90vw); margin:0 auto 12px; color:#a9c0c5; font-size:12px; }
+#combat-notices summary { cursor:pointer; padding:10px 0; color:#d5e6e8; }
+#combat-log { white-space:pre-line; line-height:1.8; margin:0; }
 .rh.evolved { color:var(--gold); border:1px solid var(--gold); }
 
 /* Readable drafts. The recipe is visible before the player commits. */

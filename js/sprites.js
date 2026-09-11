@@ -573,15 +573,18 @@ const Sprites = (() => {
   }
   // Explosion core: white-hot centre grading out through the given colour.
   function blastSprite(rgb) {
-    return mk(128, 128, (x, w) => {
+    return mk(64, 64, (x, w) => {
       const c = w / 2;
-      const g = x.createRadialGradient(c, c, 0, c, c, c);
-      g.addColorStop(0.00, 'rgba(255,255,255,1)');
-      g.addColorStop(0.18, 'rgba(255,248,220,.95)');
-      g.addColorStop(0.42, `rgba(${rgb},.8)`);
-      g.addColorStop(0.75, `rgba(${rgb},.24)`);
-      g.addColorStop(1.00, `rgba(${rgb},0)`);
-      x.fillStyle = g; x.fillRect(0, 0, w, w);
+      x.fillStyle = `rgba(${rgb},.65)`;
+      x.beginPath();
+      for (let i = 0; i < 20; i++) {
+        const a = i / 20 * Math.PI * 2, r = i % 2 ? 23 : 31;
+        const px = c + Math.cos(a) * r, py = c + Math.sin(a) * r;
+        if (i) x.lineTo(px, py); else x.moveTo(px, py);
+      }
+      x.closePath(); x.fill();
+      x.fillStyle = '#ffe09a'; x.beginPath(); x.arc(c, c, 17, 0, 7); x.fill();
+      x.fillStyle = '#fff4d1'; x.beginPath(); x.arc(c - 3, c - 2, 9, 0, 7); x.fill();
     });
   }
   // Soft smoke puff with a little internal structure so it isn't a flat blob.

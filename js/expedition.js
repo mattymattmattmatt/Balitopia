@@ -11,9 +11,9 @@ const Expedition = (() => {
       desc: 'Alternating bosses and escalating curses. How far can you go?' },
   ];
   const routes = [
-    { id: 'land', name: 'Emerald Wilds', icon: '✿', color: '#87edbf', rule: 'Jungle growth slows the horde.' },
-    { id: 'sea', name: 'Sapphire Coast', icon: '≈', color: '#7cdbff', rule: 'Surging tides push fighters sideways.' },
-    { id: 'sky', name: 'Sunspire Heights', icon: '◇', color: '#f8d07f', rule: 'Crosswinds bend your projectiles.' },
+    { id: 'land', name: 'Emerald Wilds', icon: '✿', color: '#87edbf', rule: 'Lush jungle scenery. Clear ground.' },
+    { id: 'sea', name: 'Sapphire Coast', icon: '≈', color: '#7cdbff', rule: 'Bright coastal scenery. Calm tides.' },
+    { id: 'sky', name: 'Sunspire Heights', icon: '◇', color: '#f8d07f', rule: 'Sunlit island scenery. Still skies.' },
   ];
   const blessings = [
     { id: 'tide', name: 'Tidekeeper', icon: '≈', desc: '+25 HP · +25% pickup range',
