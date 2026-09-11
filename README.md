@@ -175,9 +175,15 @@ title screen plus a cinematic story backdrop (both built by `tools/compose_*.js`
 **[ASSETS.md](ASSETS.md)** for the asset layout and the short list of art still wanted.
 Anything missing falls back to procedural code-drawn art, so the game always runs.
 
-**Sound effects:** the punchy one-shots (powershot, level/tier-up, pickups, UI clicks…) are
-wired to drop-in ElevenLabs samples with synth fallbacks — see **[SOUND_DESIGN.md](SOUND_DESIGN.md)**
-for the full list, generation prompts, and how to enable each one.
+**Impact audio — build 5:** blasts have a crack, bass body and pressure tail;
+enemy deaths have wet splats and tearing sounds, followed by chunk impacts.
+Mass kills share a bounded mixer, music ducks during blasts, and recorded
+effects now obey the Effects slider and master mute. The 24 original combat
+clips are generated once and reused. Hear the
+[audio preview](docs/impact-audio-preview.mp3) and see
+[AUDIO_IMPACT.md](AUDIO_IMPACT.md) for mixing, budgets and verification.
+Other recorded effects retain synthesized fallbacks; the earlier recording
+brief remains in [SOUND_DESIGN.md](SOUND_DESIGN.md).
 
 ### Getting around
 

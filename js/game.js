@@ -198,7 +198,8 @@ let heroMods = [];             // per-hero signature-upgrade mods (only that her
 let powerWaves = [];           // queued powershot projectile rings
 let relics = [];               // [{ def, lv, ws }] — the second weapon slot
 let chests = [], pools = [], ghosts = [], spires = [], totems = [];
-const gore = Gore.create({ makeCanvas: () => document.createElement('canvas'), world: WORLD });
+const gore = Gore.create({ makeCanvas: () => document.createElement('canvas'), world: WORLD,
+  onLand: (x,y,energy) => Sound.sfx.goreLand(x,y,energy) });
 const freshHeroMod = () => ({ dmg: 1, rate: 1, area: 1, speed: 1, pierceAdd: 0, countAdd: 0, jumpsAdd: 0, exploadMul: 1, fx: {} });
 
 // ---------------- Shared effective-weapon resolution ----------------
@@ -275,6 +276,7 @@ let hearts = [], patches = [], effects = [], telegraphs = [];
 let partCursor = 0;
 function configureGore() {
   gore.configure({ level: prefs.gore, motion: !!prefs.motion, bits: QL.gibs, tiles: QL.stainTiles, burst: QL.goreBurst });
+  Sound.setGore(prefs.gore);
 }
 function prepareGoreBodies() {
   for (const base of ['minyar', 'demonder', 'clubbo'])
@@ -639,6 +641,7 @@ function killEnemy(e, src, hit = {}) {
   if (e.type === 'golden') { spawnChest(e.x, e.y, 'gold'); banner('💰 THE GOLDEN ONE FALLS'); }
   else dropGem(e.x, e.y, e.xp * (G.diff && G.diff.rule === 'lean' ? 0.75 : 1) * (G.mut.xp || 1));
 
+  Sound.sfx.splatter(e.x,e.y,e.elite || e.r>=24 || !!hit.blast);
   gore.burst(e.x, e.y, e.cyOff || 20, e.r, { ...hit, body: e.base + e.tier, visible: nearView(e.x, e.y, 250) });
 
   // lifesteal (Bloodtide upgrade + Swack's trait)
@@ -678,7 +681,7 @@ function killEnemy(e, src, hit = {}) {
   } else if (e.type === 'demonder') {
     Sound.playFile('assets/audio/enemies/demonder_defeat.wav', 0.7);
     if (dropsHearts() && Math.random() < 0.14) hearts.push({ x: e.x, y: e.y, t: 0 });
-  } else if (Math.random() < 0.25) Sound.sfx.kill();
+  }
   // Splitting can reuse this pooled enemy immediately. Finish all reads and
   // death rewards before allowing the slot to become a new living enemy.
   if (e.elite) onEliteDeath(e);
@@ -756,7 +759,7 @@ function damageEnemy(e, dmg, o) {
   }
   // Hit confirmation. Sound.sfx.hit() shipped in the manifest and was never
   // called from anywhere — every hit in the game landed in total silence.
-  Sound.sfx.hit(crit);
+  Sound.sfx.hit(crit,e.x,e.y);
   if (crit) {
     spawnParts(e.x, bodyY(e), '#fff59d', 5, 190, 'spark');
     buzz(HAPTIC.crit);
@@ -805,6 +808,7 @@ function killBoss(b, hit = {}) {
   b.alive = false;
   G.bossKills++;
   G.shake = 18;
+  Sound.sfx.powershot(b.x,b.y,480); Sound.sfx.splatter(b.x,b.y,true);
   gore.burst(b.x, b.y, 70, 48, { ...hit, body: 'boss', boss: true, blast: true, visible: nearView(b.x, b.y, 250) });
   for (let i = 0; i < 6; i++)
     dropGem(b.x + (Math.random() - 0.5) * 120, b.y + (Math.random() - 0.5) * 90, 25);
@@ -1232,6 +1236,7 @@ function tickTimers(dt) {
 }
 
 function explodeAt(x, y, r, dmg, src) {
+  Sound.sfx.explosion(x,y,r);
   const hit = { src, fromX: x, fromY: y, blast: true };
   eachEnemyNear(x, y, r + 30, e => {
     if ((e.x - x) ** 2 + (e.y - y) ** 2 < (r + e.r) ** 2) damageEnemy(e, dmg, hit);
@@ -2287,8 +2292,10 @@ function frame(ts) {
   try {
     // hit-stop: freeze the sim for a few frames on impactful hits so they land with weight
     if (G.hitStop > 0 && G.running && !G.over) { G.hitStop -= dt; render(0); return; }
+    if (player) Sound.listener(player.x,player.y,viewW);
     if (G.running && !G.over && window.innerWidth > window.innerHeight) update(dt * G.timeScale);
     if (G.over && $('screen-over').classList.contains('hidden')) gore.update(dt);
+    Sound.tick();
     // The game used to render a full 60fps playfield behind opaque full-screen
     // overlays. Nothing there changes — so don't draw it.
     if (anyOverlayOpen() && !G.running) {
@@ -3601,8 +3608,7 @@ function powershot() {
   G.flash = 0.22 * ((prefs.flash == null ? 25 : prefs.flash) / 100);
   shakeAt(player.x, player.y - 1, 13);
   player.iv = Math.max(player.iv, 1.2);
-  Sound.sfx.powershot();
-  Sound.playFile(`assets/audio/heroes/${hero.id}_entrance.wav`, 0.9);
+  Sound.sfx.powershot(player.x,player.y,R);
   buzz(HAPTIC.power);
   banner(`⚡ ${hero.name.toUpperCase()} POWERSHOT ⚡`);
   return true;
@@ -3862,6 +3868,7 @@ function showMutatorDraft() {
 
 // ---------------- Roster ----------------
 function openRoster() {
+  Sound.resetCombat();
   renderContracts();
   G.running = false;
   const grid = $('roster-grid');
@@ -4030,6 +4037,7 @@ function resolveDaily(save, ctx) {
 
 // ---------------- Game flow ----------------
 function newGame(heroIdx, diffIdx, daily) {
+  Sound.resetCombat(); Sound.prepareRun(HEROES[heroIdx].id);
   const save = loadSave();
   G.session = Expedition.create(selectedMode, selectedRoute, selectedBlessing, daily);
   const sessionMode = Expedition.mode(G.session.mode);
@@ -4173,6 +4181,7 @@ function newGame(heroIdx, diffIdx, daily) {
   G.session.route = G.region.split('-')[1];
   G.biome = G.region.split('-')[1];
   G.musicRot = 0;
+  Sound.listener(player.x,player.y,viewW);
   Sound.playMusic(`music/${battleTrack()}.mp3`);
   Sound.playFile(`assets/audio/heroes/${HEROES[heroIdx].id}_entrance.wav`, 0.9);
   banner(`${HEROES[heroIdx].name.toUpperCase()} — BREAK THE CAGES!`);
@@ -5043,7 +5052,7 @@ function showScreen(id, music) {
   if (music === 'title') Sound.playMusic('music/title.mp3');
   else if (music === 'none') { Sound.stopMusic(); Sound.stopPreview(); }
 }
-function goTitle()  { Sound.stopPreview(); $('screen-over').classList.add('hidden'); $('screen-records').classList.add('hidden'); refreshHome(); showScreen('screen-title', 'title'); }
+function goTitle()  { Sound.resetCombat(); Sound.stopPreview(); $('screen-over').classList.add('hidden'); $('screen-records').classList.add('hidden'); refreshHome(); showScreen('screen-title', 'title'); }
 function goStory()  { Sound.stopPreview(); showScreen('screen-story', 'title'); }
 function goSelect() { buildSelect(); showScreen('screen-select', 'none'); }  // quiet for hero previews
 

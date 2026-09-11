@@ -90,7 +90,7 @@ function harness(saved = {}, ports = {}) {
     localStorage: { getItem: k => storage.get(k) || null, setItem: (k,v) => storage.set(k,String(v)), removeItem: k => storage.delete(k) },
     setTimeout: (fn, delay = 0) => { timers.set(++timerId, { fn, at: now + delay }); return timerId; },
     clearTimeout: id => timers.delete(id), setInterval: () => 0, clearInterval: noop,
-    URL, URLSearchParams, Blob, Uint8ClampedArray, Math: testMath, Sound: sound,
+    URL, URLSearchParams, Blob, Uint8ClampedArray, Math: testMath, Sound: ports.Sound || sound,
     Sprites: { init: () => ({ then: fn => { boot = fn; return { catch: noop }; } }),
       portrait: () => new Element('canvas'), get: () => ({ width: 96, height: 96 }),
       light: () => new Element('canvas'), shade: color => color,
