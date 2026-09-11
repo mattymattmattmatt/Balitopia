@@ -1,96 +1,136 @@
-# Gore and explosion performance
+# Red splatter — build 4
 
-Kills should leave a mess while the player keeps moving. This update replaces
-the disappearing-body animation with blood spray, flesh, bone and hide chunks.
-Explosions and powershots throw fragments away from the blast centre. Chunks
-bounce once, settle and leave small splashes; the larger death splatter remains
-on the ground.
+The previous death effect was too subtle. Its maroon stains blended into the
+terrain, bright weapon effects covered airborne blood, and the first few
+kills could exhaust the entire flying-particle budget. Damage and combo
+labels also still floated over combat after banners were removed.
+
+This update makes the requested gore unmistakable: scarlet ground splashes,
+long red jets and droplets, six pieces cut from each enemy's actual artwork,
+spinning body chunks, blood trails and persistent landed remains. Explosions
+throw extra fragments away from their centre. Stains cover scenery; enemy
+bullets render above the airborne gore. The existing simplified blasts,
+reduced scenery, disabled full-screen lighting and particle caps stay in use.
+
+## Actual combat renderer
+
+These captures run `game.js` and the existing sprite loader at 844×390 through
+native Canvas, with a controlled group of 35 enemies and successive explosions.
+DOM and audio are simulated; these are combat-renderer captures, not browser
+screenshots or phone FPS measurements. The HTML HUD is not included.
+
+Before the explosions:
+
+![Enemies before the explosions](docs/gore-before.png)
+
+During the explosions:
+
+![Red spray and enemy chunks during combat](docs/gore-preview.png)
+
+After the explosions:
+
+![Blood and body fragments left across the scenery](docs/gore-aftermath.png)
+
+Reproduce with an optional `@napi-rs/canvas` installation available on `NODE_PATH`:
+
+```sh
+node tools/test/render-gore.cjs
+```
+
+The preview PNGs and QA tools are excluded from the production build.
 
 ## Rendering and limits
 
-`js/gore.js` creates a 512×128 atlas containing eight puddle variants and
-pre-rotated chunks. It uses its own seeded cosmetic random generator; gore
-does not consume the game's random stream or change rewards. No new art files,
-network requests or runtime dependencies are required.
+A 512×256 atlas holds puddles, fallback fragments and eight blood-burst frames.
+At the start of a run, up to 19 enemy variants each get a 192×144 sheet of six
+body fragments in eight rotations, plus a 512×64 breakup animation. All art
+comes from the existing enemy sprites and native Canvas drawing; no new
+runtime dependency, external image request or downloaded gore asset is needed.
 
-Blood and settled chunks are baked into sparse ground textures: 512 world
-units per tile at 128×128 pixels. Each occupied visible tile needs one draw,
-regardless of how many enemies died there. Stamps crossing seams are written
-to all intersected tiles. Distant tiles are reused when the cache fills;
-stains otherwise persist until a new run. A bounded queue spreads texture
-painting across frames rather than writing every splatter during a mass kill.
+Each visible death receives an independently pooled breakup animation. One
+cached blit shows six pieces separating amid a red spray even when the flying
+particle budget is exhausted. When this pool also fills, the oldest animation
+is replaced so a new kill still registers. Flying body chunks and droplets use
+a separate fixed pool; landed blood and pieces are baked into sparse ground
+tiles. Neither system consumes the gameplay random stream.
 
-| Preset | Airborne fragment cap | New fragments per update | Ground tile cap | Cosmetic effect cap | Ground + atlas RGBA bytes |
-|---|---:|---:|---:|---:|---:|
-| High | 320 | 128 | 64 | 80 | 4.25 MiB |
-| Balanced | 240 | 96 | 48 | 56 | 3.25 MiB |
-| Battery saver | 160 | 64 | 32 | 36 | 2.25 MiB |
-| High performance | 120 | 48 | 24 | 24 | 1.75 MiB |
+| Preset | Breakup animation cap | Flying fragment cap | New flying fragments per update | Ground tile cap | Cosmetic effect cap | Maximum gore texture pixels, RGBA |
+|---|---:|---:|---:|---:|---:|---:|
+| High | 320 | 320 | 128 | 64 | 80 | 8.88 MiB |
+| Balanced | 240 | 240 | 96 | 48 | 56 | 7.88 MiB |
+| Battery saver | 160 | 160 | 64 | 32 | 36 | 6.88 MiB |
+| High performance | 120 | 120 | 48 | 24 | 24 | 6.38 MiB |
 
-The byte figures describe pixel storage, excluding browser/driver overhead.
-The paint queue holds at most 256 stamps; Full mode paints at most 24 per update,
-Light at most 12. Reduced motion uses ground stains without flying chunks.
-Off immediately clears both. Quality changes trim existing pools immediately.
+Texture figures include all 19 cached body variants and the blood atlas,
+excluding browser/driver overhead. The body sheets account for 4.38 MiB and
+are reused across runs. Ground tiles are 128×128 pixels covering 512 world
+units, drawn once per occupied visible tile regardless of stain count. Distant
+tiles are recycled when the cache fills. Nearest-neighbour ground sampling
+avoids translucent seams between tiles at fractional camera positions.
 
-General particles now have a 160-slot pool and a per-update spawn budget.
-Cosmetic effects have a separate hard cap; new blasts take priority over muzzle
-flashes and impacts. Damage, blast radius, enemy kills and XP are resolved even
-when a visual pool is full. Important enemy attack telegraphs remain separate
-from the cosmetic effects budget.
+The queue holds at most 256 stamps. Carnage paints at most 24 per update;
+Light paints at most 12. Optional satellite splashes and blood trails leave
+queue space for new deaths. Normal and explosive kills request 18/30 flying
+fragments in Carnage, 6/9 in Light; bosses request 54/18. Body-breakup sprites
+last 0.52 seconds (0.38 in Light). Reduced motion retains static blood without
+airborne gore; Off clears all remains and active animations immediately.
+Retry clears both pools, stains and pending texture writes. Damage, kills,
+XP and rewards remain independent of every cosmetic cap.
 
-The full-screen light composite, animated ambient darkening and projectile
-trails are removed. Blasts use one small cached core and a thin ring; chains and
-beams have fewer drawing passes, and puffs use plain alpha instead of additive
-glow. Rainbow projectile colours are quantized into twelve cacheable hues.
-Scenery density and default render resolution are reduced. Auto quality tops
-out at Balanced so a quiet opening does not enable heavier graphics before
-the next crowded fight. High remains available manually.
+## Clear combat view and updates
 
-Repeated critical/heavy hits no longer invoke hit-stop. Powershots no longer
-freeze combat or force slow motion after a mass kill. Audio and restrained
-shake still provide impact feedback. Setting Screen flash to zero now also
-disables the powershot flash completely.
+All floating damage, critical, combo, healing, ward and charge text is removed,
+including the old Damage numbers setting. Existing saved number preferences
+cannot re-enable it. Banner and coach elements and their unused styles are
+gone. Important progress remains in the fixed HUD, menus and recap; recent
+announcements are available only in Pause's collapsed Recent action log.
+Upgrade choices still function. Tide shifts, wind drift and the other removed
+environmental events remain removed.
 
-## Fewer interruptions
+Settings calls Full gore **Carnage** (the saved value is still `full`) and shows
+**RED SPLATTER · BUILD 4** so the installed version is identifiable. Saves,
+unlocks, currency and explicit gore/motion preferences are preserved.
 
-The centre-screen banner and coaching elements and their timer machinery are
-removed. Important run progress remains in the HUD and recap. Six recent
-announcements can be read in the collapsed **Recent action** section in Pause.
-Tutorial controls remain available in How to Play.
+HTML, CSS and script URLs identify this release. Service worker installation
+bypasses the HTTP cache and only activates after the complete shell is cached.
+Navigations check the network but only accept HTML matching the active build;
+a newer entry triggers a worker update and waits for its matching assets. The
+current entry remains available offline. Update checks bypass the worker's
+HTTP cache. Controller changes refresh a visible menu after saving, while
+active runs, paused runs and upgrade choices defer refresh. First installation
+does not reload the game. No update toast or combat popup is added.
 
-Sea pushes, wind drift, jungle cover slowdown, the rising damage tide and
-shrinking arena are removed. Ebb Tide is removed from the curse pool. Cataclysm
-uses an elite-focused rule. Existing combat waves, surges, siege cages,
-minibosses and bosses remain: these provide enemies and progression rewards.
-
-The service worker cache is bumped and includes the gore script. Existing
-saves, unlocks and currency retain their identity. Monster gore defaults to
-Full and is stored with the other settings.
+After this PR is merged and Pages deploys, reopen the game. For a tab still
+running an older worker, opening `?build=4-red-splatter` on the game URL also
+bypasses its previously cached navigation. Verify the build label in Settings.
+The patch does not erase browser storage to update the game.
 
 ## Verification
 
-- All 27 rules/simulation regressions pass, including the existing 24-Guardian
-  smoke test with render-path calls.
-- Stress coverage includes 9,000 synthetic deaths against the gore budget,
-  repeated batches of 120 actual enemies killed by explosions on every quality
-  preset, identical combat outcomes across gore settings, tile seams, settings,
-  retry cleanup, environmental-rule removal and pooled splitting-elite deaths.
-- The production build and JavaScript syntax checks pass; the new script is
-  present in the app shell and offline precache.
-- Native Canvas renders of the real atlas, airborne fragments and settled
-  stains over the existing scenery were inspected. These are renderer samples,
-  not screenshots of browser gameplay.
+- All 36 rules, simulation and update regressions pass, including the existing
+  24-Guardian smoke test and production asset references.
+- Stress tests cover 9,000 synthetic deaths, repeated 120-enemy explosions on
+  all four quality presets, later deaths with a saturated particle pool,
+  bounded body caches, and identical combat rewards across gore settings.
+- Render-path tests verify no combat text with legacy `dmgnum: all` saves;
+  settings, retry and reduced motion clear the additional breakup pool.
+- Worker tests cover complete/partial installation, cache versioning, online
+  refresh, offline fallback, avoiding mixed releases, safe deferred reload and
+  first-install behavior. These use simulated worker/browser ports.
+- Production build, JavaScript syntax checks and native Canvas visual inspection
+  pass. Browser touch input, real offline lifecycle behavior and phone frame
+  times still require device testing; no measured phone FPS improvement is claimed.
 
-Phone FPS, browser touch input and offline updating still need device testing.
-The limits above bound work and memory; they do not establish a measured FPS
-gain. Playtest a large explosion build with a full squad and compare frame
-times on the same phone before releasing.
-
-## Technical reference
+## Technical references
 
 W. T. Reeves (1983), *Particle Systems—a Technique for Modeling a Class of
 Fuzzy Objects*, ACM Transactions on Graphics 2(2), 91–108,
 [DOI 10.1145/357318.357320](https://doi.org/10.1145/357318.357320).
-Peer reviewed. **Credibility: 9/10** for the foundational particle-lifecycle
-model. The pooling, tile cache and budgets here are implementation decisions;
-this paper is not evidence of performance on modern phones or in Balitopia.
+Peer reviewed. **Credibility: 9/10** for the particle-lifecycle model, not for
+performance claims about this implementation or modern phones.
+
+[W3C Service Workers specification](https://www.w3.org/TR/service-workers/).
+Primary web-platform specification. **Credibility: 10/10** for Cache/addAll,
+installation and updateViaCache semantics; it is not a peer-reviewed game
+performance study. Pool sizes, visual intensity and update integration here
+are implementation choices validated to the extent described above.

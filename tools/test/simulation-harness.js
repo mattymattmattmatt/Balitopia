@@ -1,10 +1,11 @@
-// A headless simulation host, NOT a browser or a rendering test. Game logic is
-// real; DOM, canvas and sound are no-op ports. No network / packages required.
+// A headless game host, not a browser. Game logic is
+// real; default DOM/canvas/sound ports are no-ops. Optional native Canvas ports
+// exercise the actual sprite loader and combat renderer without a browser.
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 const root = path.resolve(__dirname, '../..');
-function harness(saved = {}) {
+function harness(saved = {}, ports = {}) {
   let now = 0, timerId = 0;
   const timers = new Map(), nodes = new Map(), storage = new Map(Object.entries(saved));
   const noop = () => {};
@@ -54,22 +55,33 @@ function harness(saved = {}) {
     setPointerCapture() {}
     releasePointerCapture() {}
   }
+  function element(tag) {
+    const el = new Element(tag);
+    if (tag !== 'canvas' || !ports.makeCanvas) return el;
+    const canvas = ports.makeCanvas();
+    Object.assign(canvas, el);
+    for (const name of Object.getOwnPropertyNames(Element.prototype)) {
+      const desc = Object.getOwnPropertyDescriptor(Element.prototype, name);
+      if (name !== 'constructor' && name !== 'getContext' && typeof desc.value === 'function') canvas[name] = desc.value.bind(canvas);
+    }
+    return canvas;
+  }
   const html = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
   for (const match of html.matchAll(/<([\w-]+)\b([^>]*\bid="([^"]+)"[^>]*)>/g)) {
-    const el = new Element(match[1]); el.id = match[3];
+    const el = element(match[1]); el.id = match[3];
     el.className = /class="([^"]*)"/.exec(match[2])?.[1] || '';
     nodes.set(match[3], el);
   }
   const document = { body: new Element('body'), documentElement: new Element('html'),
     getElementById: id => nodes.get(id) || null,
-    createElement: tag => new Element(tag), addEventListener: noop, hidden: false };
+    createElement: tag => element(tag), addEventListener: noop, hidden: false };
   let boot;
   let rng = 123456;
   const testMath = Object.create(Math);
   testMath.random = () => { rng = (Math.imul(rng, 1664525) + 1013904223) >>> 0; return rng / 4294967296; };
   const sound = new Proxy({ sfx: new Proxy({}, { get: () => noop }), ensure: noop }, { get: (o, key) => o[key] || noop });
   const sandbox = {
-    console, document, navigator: { userAgent: 'Simulation test', vibrate: noop },
+    console, document, Image: ports.Image, navigator: { userAgent: 'Simulation test', vibrate: noop },
     location: { protocol: 'test:', search: '' }, performance: { now: () => now },
     innerWidth: 844, innerHeight: 390, devicePixelRatio: 1,
     matchMedia: () => ({ matches: false, addEventListener: noop }),
@@ -88,8 +100,13 @@ function harness(saved = {}) {
   };
   sandbox.window = sandbox;
   vm.createContext(sandbox);
-  for (const file of ['js/data.js', 'js/expedition.js', 'js/gore.js', 'js/game.js'])
+  const files = ['js/data.js', 'js/expedition.js', 'js/gore.js', 'js/update.js'];
+  if (ports.makeCanvas) files.push('js/sprites.js');
+  files.push('js/game.js');
+  for (const file of files) {
     vm.runInContext(fs.readFileSync(path.join(root, file), 'utf8'), sandbox, { filename: file });
+    if (file === 'js/sprites.js') vm.runInContext('globalThis.__spritesReady = Sprites.init(); Sprites.init = () => __spritesReady;', sandbox);
+  }
   function advance(ms) {
     const end = now + ms;
     let guard = 10000;
@@ -101,7 +118,7 @@ function harness(saved = {}) {
     if (guard <= 0) throw new Error('Timer loop');
     now = end;
   }
-  return { B: sandbox.__balitopia, nodes, sandbox, advance, boot: () => boot(),
+  return { B: sandbox.__balitopia, nodes, sandbox, advance, boot: () => boot(), ready: sandbox.__spritesReady, context,
     read: expr => vm.runInContext(expr, sandbox), storage };
 }
 module.exports = { harness, root };

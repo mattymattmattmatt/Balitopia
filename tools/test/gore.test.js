@@ -21,7 +21,7 @@ function host() {
 test('a death throws fragments, which settle into persistent ground stains', () => {
   const { gore, calls, clearCalls } = host();
   gore.burst(900, 900, 25, 18, { blast: true, fromX: 800, fromY: 900 });
-  assert.equal(gore.stats().active, 24);
+  assert.equal(gore.stats().active, 30);
   assert(gore.fragments().every(p => p.vx > 0), 'blast pushes fragments away from its origin');
   for (let i = 0; i < 240; i++) gore.update(1/60);
   assert.equal(gore.stats().active, 0); assert.equal(gore.stats().pending, 0);
@@ -52,7 +52,7 @@ test('thousands of deaths cannot exceed particle, queue, texture or per-update p
     const s = gore.stats();
     assert(s.active <= 120); assert(s.pending <= 256); assert(s.tiles <= 24);
     assert(s.painted - before <= 24);
-    assert(s.textureBytes <= 24 * 128 * 128 * 4 + 512 * 128 * 4);
+    assert(s.textureBytes <= 24 * 128 * 128 * 4 + 512 * 256 * 4);
     assert(gore.fragments().every(p => Number.isFinite(p.x + p.y + p.z)));
   }
   assert(gore.stats().evicted > 0, 'old distant tiles are reused');
@@ -101,6 +101,7 @@ test('repeated mass explosions keep all damage while cosmetics stay bounded on e
       assert.equal(B.G.kills, 120 * (round + 1), 'every enemy dies even with a full effects pool');
       assert(B.effects().length <= cap.effects);
       assert(B.gore.stats().active <= cap.gibs);
+      assert(B.gore.stats().bursts <= cap.gibs);
       assert(B.gore.stats().pending <= 256);
       assert.equal(B.G.hitStop, 0, 'mass kills do not freeze combat');
       B.player().iv = 5; B.update(1/60); B.render(1/60);
@@ -156,4 +157,54 @@ test('a splitting elite cannot corrupt its death rewards or children when its po
   assert(children.every(c => c.tier === 2));
   assert(children.every(c => Math.abs(Math.hypot(c.x-2700,c.y-2700)-44)<0.001));
   assert(B.gore.stats().active > 0);
+});
+
+test('later deaths still disintegrate with a full flying-fragment budget', () => {
+  const { gore } = host();
+  gore.configure({ level: 'full', bits: 120, burst: 12 });
+  const source = { width: 96, height: 96 };
+  gore.prepareBody('minyar0', source);
+  for (let i=0;i<120;i++) gore.burst(500+i*5,500,25,18,{blast:true,body:'minyar0'});
+  assert.equal(gore.stats().active,12, 'flying bits respect the per-update budget');
+  assert.equal(gore.stats().bursts,120, 'every admitted death has its own breakup animation');
+  const draws=[];
+  gore.drawAir({ drawImage: (...args) => draws.push(args), fillRect() {} }, () => true);
+  assert.equal(draws.filter(a => a[3] === 64 && a[4] === 64).length,120, 'one cached blit per disintegrating body');
+  gore.burst(1800,1800,25,18,{body:'minyar0'});
+  const fresh=[];
+  gore.drawAir({ drawImage: (...args) => fresh.push(args), fillRect() {} }, (x,y) => x===1800);
+  assert.equal(fresh.length,1, 'the newest kill remains visible when both pools are full');
+  assert.equal(gore.stats().bursts,120);
+  assert(gore.fragments().some(p => p.body), 'flying chunks retain the real enemy art');
+});
+
+test('body sprite caches are bounded and reset/Off/reduced motion clear all death animations', () => {
+  const { gore } = host();
+  for (let i=0;i<90;i++) gore.prepareBody('body'+i,{width:96,height:96});
+  assert.equal(gore.stats().bodies,19);
+  assert(gore.stats().textureBytes <= 19*(192*144+512*64)*4+512*256*4);
+  for (const mode of ['reset','off','motion']) {
+    gore.configure({level:'full'}); gore.burst(100,100,25,18,{body:'body0'});
+    assert.equal(gore.stats().bursts,1);
+    if (mode==='reset') gore.reset(3);
+    if (mode==='off') gore.configure({level:'off'});
+    if (mode==='motion') gore.configure({level:'full',motion:false});
+    assert.equal(gore.stats().active+gore.stats().bursts,0);
+  }
+});
+
+test('legacy damage-number preferences cannot reintroduce combat text', () => {
+  const saved = JSON.stringify({v:3,prefs:{dmgnum:'all',gore:'full'}});
+  const { B, context, nodes, boot } = harness({balitopia:saved}); boot(); B.newGame(0,0);
+  B.G.mods.crit=1; B.G.xpNext=1e9;
+  for (const c of B.cages()) c.broken=true;
+  const p=B.player(); p.iv=0; B.G.wardUp=1;
+  B.hurtPlayer(10); B.heroState()[0].charge=0.25; B.tryPowershot();
+  for (let i=0;i<20;i++) B.damageEnemy(B.spawnEnemy('minyar',0,p.x+150+i*2,p.y),1000,{src:0});
+  const texts=[]; context.fillText=(text) => texts.push(String(text)); context.strokeText=context.fillText;
+  for (let i=0;i<20;i++) { B.update(1/60); B.render(1/60); }
+  assert.deepEqual(texts,[], 'kills, crits, ward and denied charge draw no world text');
+  assert.equal(nodes.has('set-dmgnum'),false);
+  assert.equal(nodes.has('banner'),false); assert.equal(nodes.has('coach'),false);
+  assert.equal(B.G.kills,20); assert(B.G.combo>0);
 });
