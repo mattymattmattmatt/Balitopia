@@ -4,7 +4,7 @@
 const Gore = (() => {
   const TILE = 512, RES = 128, MAX_BITS = 320, QUEUE = 256, MAX_BODIES = 19;
   const TAU = Math.PI * 2;
-  function create({ makeCanvas, world = 5200 }) {
+  function create({ makeCanvas, world = 5200, onLand = () => {} }) {
     let seed = 1, atlas = null, cursor = 0, active = 0, emitted = 0;
     let popCursor = 0, pops = 0, head = 0, pending = 0, clock = 0, painted = 0, evicted = 0;
     let level = 'full', motion = true, limit = 240, tileLimit = 48, burstLimit = 96;
@@ -231,6 +231,7 @@ const Gore = (() => {
           p.trail = 0; stamp(p.x, p.y, 18 + p.size, 0);
         }
         if (p.z <= 0 || p.t > 2) {
+          if(p.kind && !p.bounce) onLand(p.x,p.y,Math.max(1,Math.min(3,p.size/18*Math.abs(p.vz)/260)));
           p.z = 0;
           if (p.kind && !p.bounce && p.t < 1.4) { p.bounce = 1; p.vz = Math.abs(p.vz) * 0.24; }
           else {

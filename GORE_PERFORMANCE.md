@@ -1,5 +1,8 @@
 # Red splatter — build 4
 
+Build 5 retains these visuals and adds [impact and splatter audio](AUDIO_IMPACT.md).
+Its current Settings label is **IMPACT AUDIO · BUILD 5**.
+
 The previous death effect was too subtle. Its maroon stains blended into the
 terrain, bright weapon effects covered airborne blood, and the first few
 kills could exhaust the entire flying-particle budget. Damage and combo

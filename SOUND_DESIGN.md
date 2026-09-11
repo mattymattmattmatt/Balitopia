@@ -1,9 +1,20 @@
-# 🔊 Balitopia — Sound Effects to Generate (ElevenLabs)
+# Balitopia — sound design
 
-These are the one-shot sound effects that would lift the game from "synth placeholder"
-to "juicy." The game is **already wired for every file below** — enable a sound and it's
-used the instant it's present, falling back to the built-in WebAudio synth until then. So
-you can generate them in any order and they just work.
+**Build 5 uses the original combat sound bank and shared mixer described in
+[AUDIO_IMPACT.md](AUDIO_IMPACT.md).** Blasts, powershots, enemy hits, wet deaths
+and chunk landings now come from `js/combat-audio.js`. Recorded UI, reward,
+character and music assets remain in use. All recorded effects share the
+Effects slider and master mute. No external sound-generation service is
+required for the new combat sounds.
+
+[Listen to the current combat preview](docs/impact-audio-preview.mp3).
+
+## Archived recorded-sample brief
+
+The prompts below document the earlier recording pipeline. Its `powershot`,
+`hit` and `kill` entries are superseded by the combat bank; adding or replacing
+those files no longer changes those cues. Other optional effects can still
+use the recorded-sample workflow with immediate synthesized fallbacks.
 
 ## How to add them
 
@@ -36,7 +47,7 @@ A hair of headroom (don't max the loudness) keeps them from clipping when severa
 | 9 | `hit.mp3` | A projectile connects with an enemy | 0.15s | *Short soft impact — a squishy cartoon "thwack" hitting a slime creature, light and punchy, dry, no tail* |
 | 10 | `kill.mp3` | A common enemy (Minyar) is destroyed | 0.35s | *Short comedic monster defeat — a squishy pop with a quick descending cartoon "wah", goofy slime splat, dry, punchy* |
 
-## UI / menu SFX (pure polish — silent today, no fallback)
+## UI / menu SFX (recorded samples with synthesized fallbacks)
 
 | # | File | Used when | Duration | ElevenLabs prompt |
 |---|------|-----------|----------|-------------------|

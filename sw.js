@@ -1,16 +1,16 @@
 // A versioned, atomic game shell. Navigations check the network; versioned
 // scripts/CSS remain cache-first. Existing saves live in localStorage.
-const VERSION = 'v4-red-splatter';
+const VERSION = 'v5-impact-audio';
 const SHELL = 'balitopia-shell-' + VERSION;
 const MEDIA = 'balitopia-media-' + VERSION;
 const MEDIA_MAX = 60;
 const SHELL_FILES = [
   './', './index.html', './manifest.json',
   './assets/img/title_vs.jpg', './assets/img/story_bg.jpg',
-  './css/style.css?v=4-red-splatter', './css/studio.css?v=4-red-splatter',
-  './js/data.js?v=4-red-splatter', './js/sprites.js?v=4-red-splatter',
-  './js/audio.js?v=4-red-splatter', './js/expedition.js?v=4-red-splatter',
-  './js/gore.js?v=4-red-splatter', './js/update.js?v=4-red-splatter', './js/game.js?v=4-red-splatter',
+  './css/style.css?v=5-impact-audio', './css/studio.css?v=5-impact-audio',
+  './js/data.js?v=5-impact-audio', './js/sprites.js?v=5-impact-audio',
+  './js/combat-audio.js?v=5-impact-audio', './js/audio.js?v=5-impact-audio', './js/expedition.js?v=5-impact-audio',
+  './js/gore.js?v=5-impact-audio', './js/update.js?v=5-impact-audio', './js/game.js?v=5-impact-audio',
 ];
 self.addEventListener('install', e => {
   e.waitUntil((async () => {

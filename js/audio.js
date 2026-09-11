@@ -4,7 +4,10 @@
 'use strict';
 
 const Sound = (() => {
-  let ctx = null, master = null, musicGain = null, sfxGain = null;
+  let ctx = null, master = null, musicGain = null, sfxGain = null, combat = null, noiseBuffer = null;
+  let paused = false, goreLevel = 'full', audioEpoch = 0, audioSeed = 0x712ba123;
+  const synthVoices = new Set(), cueTimers = new Set();
+  const audioRandom = () => { audioSeed ^= audioSeed << 13; audioSeed ^= audioSeed >>> 17; audioSeed ^= audioSeed << 5; return (audioSeed >>> 0) / 4294967296; };
   let muted = false, musicTimer = null, step = 0;
   let musicVol = 0.8, sfxVol = 1.0, musicBase = 0.55;   // 0..1 user volumes
 
@@ -45,19 +48,47 @@ const Sound = (() => {
     return base + AUDIO_EXT;
   }
 
+  function syncCombat() { if (combat) { combat.setEnabled(!muted && !paused && sfxVol > 0); combat.setGore(goreLevel); } }
   function ensure() {
-    if (ctx) { if (ctx.state === 'suspended') ctx.resume(); return true; }
+    if (ctx) { if (ctx.state === 'suspended' && !paused) ctx.resume().catch(() => {}); return true; }
     try {
-      ctx = new (window.AudioContext || window.webkitAudioContext)();
-      master = ctx.createGain(); master.gain.value = 0.85; master.connect(ctx.destination);
-      sfxGain = ctx.createGain(); sfxGain.gain.value = 0.7 * sfxVol; sfxGain.connect(master);
+      ctx = new (window.AudioContext || window.webkitAudioContext)({ latencyHint: 'interactive' });
+      master = ctx.createGain(); master.gain.value = muted ? 0 : 0.85;
+      // A shared compressor and final soft ceiling keep overlapping blasts
+      // controlled. All one-shot samples now pass through this same SFX bus.
+      const limiter = ctx.createWaveShaper(), curve = new Float32Array(2049);
+      for (let i=0;i<curve.length;i++) {
+        const x=i/(curve.length-1)*2-1, a=Math.abs(x);
+        curve[i]=Math.sign(x)*(a<=0.8?a:0.8+0.16*Math.tanh((a-0.8)/0.16));
+      }
+      limiter.curve=curve; limiter.oversample='2x'; master.connect(limiter); limiter.connect(ctx.destination);
+      const compressor = ctx.createDynamicsCompressor();
+      compressor.threshold.value=-10; compressor.knee.value=8; compressor.ratio.value=4;
+      compressor.attack.value=0.003; compressor.release.value=0.16;
+      sfxGain = ctx.createGain(); sfxGain.gain.value = 0.7 * sfxVol;
+      sfxGain.connect(compressor); compressor.connect(master);
       musicGain = ctx.createGain(); musicGain.gain.value = 0.28 * musicVol; musicGain.connect(master);
+      combat = CombatAudio.create({ context: ctx, destination: sfxGain, onImpact: duckFor });
+      noiseBuffer = ctx.createBuffer(1, 24000, 24000);
+      const data=noiseBuffer.getChannelData(0);
+      for(let i=0;i<data.length;i++)data[i]=audioRandom()*2-1;
+      syncCombat();
+      for(const name of Object.keys(sfxHas)) loadBuffer(`assets/audio/sfx/${name}.mp3`);
+      if(ctx.state==='suspended')ctx.resume().catch(() => {});
       return true;
-    } catch (e) { return false; }
+    } catch (e) { ctx = null; return false; }
+  }
+  function synthVoice(source, gain, filter) {
+    const voice={source,gain,filter}; synthVoices.add(voice);
+    source.onended=()=>{source.disconnect();gain.disconnect();if(filter)filter.disconnect();synthVoices.delete(voice);};
+  }
+  function stopSynthVoices() {
+    for(const v of [...synthVoices]) {try{v.source.stop();}catch(_){}v.source.disconnect();v.gain.disconnect();if(v.filter)v.filter.disconnect();}
+    synthVoices.clear();
   }
 
   function blip(freq, dur, type = 'square', vol = 0.2, slide = 0) {
-    if (!ctx || muted) return;
+    if (!ctx || muted || paused || sfxVol <= 0 || synthVoices.size >= 12) return;
     const t = ctx.currentTime;
     const o = ctx.createOscillator(), g = ctx.createGain();
     o.type = type; o.frequency.setValueAtTime(freq, t);
@@ -65,99 +96,113 @@ const Sound = (() => {
     g.gain.setValueAtTime(vol, t);
     g.gain.exponentialRampToValueAtTime(0.001, t + dur);
     o.connect(g); g.connect(sfxGain);
-    o.start(t); o.stop(t + dur + 0.02);
+    synthVoice(o,g); o.start(t); o.stop(t + dur + 0.02);
   }
 
   function noise(dur, vol = 0.25, freq = 800) {
-    if (!ctx || muted) return;
+    if (!ctx || muted || paused || sfxVol <= 0 || synthVoices.size >= 12) return;
     const t = ctx.currentTime;
     const n = ctx.createBufferSource();
-    const buf = ctx.createBuffer(1, ctx.sampleRate * dur, ctx.sampleRate);
-    const d = buf.getChannelData(0);
-    for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
-    n.buffer = buf;
+    n.buffer = noiseBuffer;
     const f = ctx.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = freq;
     const g = ctx.createGain();
     g.gain.setValueAtTime(vol, t);
     g.gain.exponentialRampToValueAtTime(0.001, t + dur);
     n.connect(f); f.connect(g); g.connect(sfxGain);
-    n.start(t);
+    synthVoice(n,g,f); n.start(t,audioRandom()*0.4); n.stop(t+dur+0.015);
   }
+
+  function cueLater(fn,delay) {
+    const epoch=audioEpoch;
+    const id=setTimeout(()=>{cueTimers.delete(id);if(epoch===audioEpoch)fn();},delay);
+    cueTimers.add(id);
+  }
+  function cancelCues() {for(const id of cueTimers)clearTimeout(id);cueTimers.clear();}
 
   // throttle guard — with 24 guardians firing, un-gated SFX would melt the mixer
   const lastT = {};
   function ok(k, ms) {
     const n = performance.now();
-    if (n - (lastT[k] || 0) < ms) return false;
+    if (n - (lastT[k] ?? -Infinity) < ms) return false;
     lastT[k] = n; return true;
   }
 
   // ------- optional SFX samples (assets/audio/sfx/<name>.mp3) -------
   // Enabled via assets/audio/sfx/manifest.json (a JSON array of names).
   // Add "<name>" there and drop <name>.mp3 in the folder → used automatically;
-  // otherwise the synth voice below plays. Ships as [] so there are no 404s.
+  // otherwise the synth voice below plays. Combat blasts/gore use their own bank.
   // Full list + ElevenLabs prompts: SOUND_DESIGN.md
-  const sfxHas = {}, sfxPool = {};
+  const sfxHas = {}, decoded = new Map();
+  let cacheBytes=0, cacheClock=0;
+  const CACHE_BYTES=8*1024*1024, CACHE_COUNT=64;
+  function trimDecoded() {
+    const ready=[...decoded.entries()].filter(([,v])=>v.buffer).sort((a,b)=>a[1].used-b[1].used);
+    for(const [path,item] of ready) {
+      if(cacheBytes<=CACHE_BYTES && decoded.size<=CACHE_COUNT)break;
+      decoded.delete(path);cacheBytes-=item.bytes;
+    }
+  }
+  function loadBuffer(path) {
+    if(!ctx)return Promise.resolve(null);
+    let item=decoded.get(path);
+    if(item){item.used=++cacheClock;return item.promise;}
+    // Pending and failed entries are bounded too; no unbounded path cache.
+    if(decoded.size>=CACHE_COUNT){
+      const oldest=[...decoded.entries()].sort((a,b)=>a[1].used-b[1].used)[0];
+      decoded.delete(oldest[0]);cacheBytes-=oldest[1].bytes;
+    }
+    item={buffer:null,bytes:0,used:++cacheClock,promise:null};decoded.set(path,item);
+    item.promise=(async()=>{
+      const resolved=src(path), paths=resolved===path?[path]:[resolved,path];
+      for(const url of paths)try{
+        const response=await fetch(url);if(!response.ok)continue;
+        const buffer=await ctx.decodeAudioData(await response.arrayBuffer());
+        if(decoded.get(path)!==item)return null;
+        const bytes=buffer.length*buffer.numberOfChannels*4;
+        if(bytes>CACHE_BYTES)return null;
+        item.buffer=buffer;item.bytes=bytes;cacheBytes+=bytes;trimDecoded();return buffer;
+      }catch(_){}
+      return null;
+    })();
+    return item.promise;
+  }
   function probeSfx() {
     fetch('assets/audio/sfx/manifest.json')
       .then(r => r.ok ? r.json() : [])
-      .then(list => { if (Array.isArray(list)) list.forEach(n => sfxHas[n] = true); })
+      .then(list => { if (Array.isArray(list)) list.forEach(n => {
+        sfxHas[n] = true; if(ctx)loadBuffer(`assets/audio/sfx/${n}.mp3`);
+      }); })
       .catch(() => {});
   }
   function playSample(name, vol) {
-    const pool = sfxPool[name] || (sfxPool[name] = []);
-    let a = pool.find(x => x.paused || x.ended);
-    if (!a) {
-      if (pool.length >= 5) a = pool[0];
-      else {
-        const raw = `assets/audio/sfx/${name}.mp3`, resolved = src(raw);
-        a = new Audio(resolved);
-        // Newly generated samples ship as .mp3 only until tools/build.sh has
-        // transcoded them. Without this the encoded-set rewrite points at an
-        // .opus that isn't there yet and the cue is silently dropped.
-        if (resolved !== raw) a.addEventListener('error', () => {
-          if (!a.dataset.fellBack) { a.dataset.fellBack = '1'; a.src = raw; a.play().catch(() => {}); }
-        }, { once: true });
-        pool.push(a);
-      }
-    }
-    a.volume = vol == null ? 0.8 : vol;
-    try { a.currentTime = 0; } catch (e) {}
-    a.play().catch(() => {});
+    const path=`assets/audio/sfx/${name}.mp3`,item=decoded.get(path);
+    if(!item||!item.buffer){loadBuffer(path);return false;}
+    item.used=++cacheClock;
+    const ui=/^(ui_|button-)/.test(name), detail=/^(shoot|gem|combo|enemy-hit|hit)/.test(name);
+    if(detail && combat.focused)return false;
+    return combat.playBuffer(item.buffer,{gain:vol??0.8,priority:ui?4:detail?0:2,group:ui?'ui':'detail'});
   }
   // play the sample if present, else the synth fallback
   const fileOr = (name, vol, synth) => {
     if (muted) return;
-    if (sfxHas[name]) playSample(name, vol);
-    else if (synth) synth();
+    if (sfxHas[name] && playSample(name, vol)) return;
+    if (synth) synth();
   };
   // First name that shipped wins. Lets a cue name a new sample and keep the
   // old one as the fallback, so a half-generated audio folder still plays.
   const fileAnyOr = (names, vol, synth) => {
     if (muted) return;
     const n = names.find(x => sfxHas[x]);
-    if (n) playSample(n, vol);
-    else if (synth) synth();
+    if (n && playSample(n, vol)) return;
+    if (synth) synth();
   };
-  // Round-robin across variants so a stream of identical hits doesn't turn
-  // into a machine-gun of the exact same waveform.
-  const rr = {};
-  const fileCycleOr = (names, vol, synth) => {
-    if (muted) return;
-    const have = names.filter(x => sfxHas[x]);
-    if (!have.length) { if (synth) synth(); return; }
-    const k = names[0];
-    const i = (rr[k] = ((rr[k] || 0) + 1)) % have.length;
-    playSample(have[i], vol);
-  };
-
   // Per-archetype weapon voices. One sound for 24 weapons made every Guardian
   // feel interchangeable — this is the cheapest way to make swapping bodies
   // register as a change in the ears as well as the eyes.
   const WEAPON_VOICE = {
-    shot:  () => blip(520 + Math.random() * 120, 0.07, 'square', 0.05, -260),
+    shot:  () => blip(520 + audioRandom() * 120, 0.07, 'square', 0.05, -260),
     nova:  () => { noise(0.16, 0.15, 800); blip(300, 0.12, 'triangle', 0.07, -120); },
-    chain: () => { blip(1200 + Math.random() * 300, 0.06, 'sawtooth', 0.05, -700); noise(0.05, 0.07, 4000); },
+    chain: () => { blip(1200 + audioRandom() * 300, 0.06, 'sawtooth', 0.05, -700); noise(0.05, 0.07, 4000); },
     beam:  () => { blip(880, 0.14, 'sine', 0.07, 420); noise(0.09, 0.05, 3000); },
     slash: () => { noise(0.09, 0.12, 2600); blip(420, 0.07, 'triangle', 0.05, -180); },
     orbit: () => blip(660, 0.05, 'sine', 0.04, 120),
@@ -167,36 +212,33 @@ const Sound = (() => {
 
   // ------- public SFX -------
   const S = {
-    // UI (no synth fallback — menus were silent before, sample is pure polish)
-    uiClick()    { fileAnyOr(['button-click', 'ui_click'], 0.55); },
-    uiBack()     { fileOr('ui_back', 0.55); },
-    uiSelect()   { if (ok('uiSelect', 40)) fileOr('ui_select', 0.45); },
+    // UI samples have immediate fallbacks while their buffers load.
+    uiClick()    { fileAnyOr(['button-click', 'ui_click'], 0.55, () => blip(640,0.04,'triangle',0.1,-180)); },
+    uiBack()     { fileOr('ui_back', 0.55, () => blip(300,0.04,'triangle',0.08,-90)); },
+    uiSelect()   { if (ok('uiSelect', 40)) fileOr('ui_select', 0.45, () => blip(520,0.025,'sine',0.08)); },
     // combat
-    shoot()      { if (ok('shoot', 70)) fileOr('shoot', 0.4, WEAPON_VOICE.shot); },
+    shoot()      { if (combat && combat.focused) return; if (ok('shoot', 70)) fileOr('shoot', 0.4, WEAPON_VOICE.shot); },
     weapon(kind) {
+      if (combat && combat.focused) return;
       if (!ok('w_' + kind, kind === 'orbit' || kind === 'aura' ? 160 : 70)) return;
-      if (kind === 'shot' && sfxHas.shoot) return playSample('shoot', 0.4);
+      if (kind === 'shot' && sfxHas.shoot && playSample('shoot', 0.28)) return;
       const v = WEAPON_VOICE[kind] || WEAPON_VOICE.shot;
       if (!muted) v();
     },
-    // THE missing sound: hit.mp3 shipped in the manifest and nothing ever
-    // called this, so every hit in the game landed in silence.
-    hit(crit) {
-      const V = ['enemy-hit-1', 'enemy-hit-2', 'enemy-hit-3', 'hit'];
-      if (crit) { fileCycleOr(V, 0.85, () => { noise(0.06, 0.16, 2600); blip(1100, 0.09, 'square', 0.09, -600); }); return; }
-      if (!ok('hit', 45)) return;
-      fileCycleOr(V, 0.42, () => noise(0.04, 0.07, 1500));
-    },
-    kill()       { if (ok('kill', 60)) fileOr('kill', 0.6, () => { blip(300, 0.12, 'sawtooth', 0.1, -180); noise(0.08, 0.1, 900); }); },
+    hit(crit, x, y) { if(combat)combat.hit(x,y,crit); },
+    kill() { if(combat)combat.splat(); },
+    explosion(x,y,r) { if(combat)combat.explosion(x,y,r); },
+    splatter(x,y,big) { if(combat)combat.splat(x,y,big); },
+    goreLand(x,y,energy) { if(combat)combat.land(x,y,energy); },
     bigKill()    { blip(160, 0.3, 'sawtooth', 0.2, -110); noise(0.25, 0.22, 500); },
     slam()       { duckFor(0.6); noise(0.3, 0.3, 380); blip(90, 0.34, 'sine', 0.28, -40); },
     hurt()       { fileAnyOr(['player-damage', 'hurt'], 0.8, () => blip(180, 0.2, 'sawtooth', 0.22, -90)); },
-    gem()        { if (ok('gem', 60)) fileOr('gem', 0.5, () => blip(880 + Math.random() * 220, 0.08, 'sine', 0.12, 300)); },
+    gem()        { if (combat && combat.focused) return; if (ok('gem', 100)) fileOr('gem', 0.5, () => blip(880 + audioRandom() * 220, 0.08, 'sine', 0.12, 300)); },
     heal()       { fileOr('heal', 0.75, () => { playFile('assets/audio/sfx/catch.wav', 0.7); blip(520, 0.18, 'sine', 0.1, 260); }); },
-    level()      { duckFor(0.9); fileOr('levelup', 0.85, () => [440, 554, 659, 880].forEach((f, i) => setTimeout(() => blip(f, 0.16, 'triangle', 0.2), i * 90))); },
-    tierup()     { duckFor(1.0); fileOr('tierup', 0.9, () => [523, 659, 784, 1047].forEach((f, i) => setTimeout(() => blip(f, 0.18, 'triangle', 0.22), i * 70))); },
-    powerReady() { duckFor(0.7); fileAnyOr(['powershot-charge', 'power_ready'], 0.8, () => [784, 1047, 1319].forEach((f, i) => setTimeout(() => blip(f, 0.14, 'sine', 0.18), i * 60))); },
-    powershot()  { duckFor(1.1); fileAnyOr(['powershot-fire', 'powershot'], 1.0, () => { blip(140, 0.5, 'sawtooth', 0.3, 120); noise(0.4, 0.3, 900); }); },
+    level()      { duckFor(0.9); fileOr('levelup', 0.85, () => [440, 554, 659, 880].forEach((f, i) => cueLater(() => blip(f, 0.16, 'triangle', 0.2), i * 90))); },
+    tierup()     { duckFor(1.0); fileOr('tierup', 0.9, () => [523, 659, 784, 1047].forEach((f, i) => cueLater(() => blip(f, 0.18, 'triangle', 0.22), i * 70))); },
+    powerReady() { duckFor(0.7); fileAnyOr(['powershot-charge', 'power_ready'], 0.8, () => [784, 1047, 1319].forEach((f, i) => cueLater(() => blip(f, 0.14, 'sine', 0.18), i * 60))); },
+    powershot(x,y,r=350) { if(combat)combat.explosion(x,y,r,true); },
     cageHit()    { if (ok('cageHit', 90)) { blip(240, 0.06, 'square', 0.1, -60); noise(0.04, 0.1, 2200); } },
     cageBreak()  { duckFor(0.6); fileOr('cage-break', 0.9, () => { noise(0.22, 0.24, 3200); blip(300, 0.2, 'square', 0.16, -160); }); },
     possess()    { fileOr('possession', 0.85, () => { blip(200, 0.3, 'sine', 0.2, 700); blip(900, 0.25, 'sine', 0.12, -500); }); },
@@ -208,14 +250,14 @@ const Sound = (() => {
     wardUp()     { blip(440, 0.2, 'sine', 0.08, 220); },
     wardBreak()  { duckFor(0.5); fileOr('shield-break', 0.8, () => { noise(0.16, 0.2, 3000); blip(880, 0.16, 'triangle', 0.14, -420); }); },
     brink()      { duckFor(0.8); blip(120, 0.5, 'sine', 0.2, -40); },
-    chest()      { duckFor(1.0); [523, 659, 784, 1047, 1319].forEach((f, i) => setTimeout(() => blip(f, 0.2, 'triangle', 0.2), i * 70)); },
-    chestTick()  { blip(900 + Math.random() * 200, 0.05, 'square', 0.07); },
+    chest()      { duckFor(1.0); [523, 659, 784, 1047, 1319].forEach((f, i) => cueLater(() => blip(f, 0.2, 'triangle', 0.2), i * 70)); },
+    chestTick()  { blip(900 + audioRandom() * 200, 0.05, 'square', 0.07); },
     eliteSpawn() { duckFor(0.7); blip(180, 0.4, 'sawtooth', 0.18, -60); noise(0.25, 0.14, 600); },
     bossAppear() { duckFor(1.4); fileOr('boss-appear', 1.0, () => { blip(140, 0.6, 'sawtooth', 0.26, -50); noise(0.5, 0.2, 500); }); },
-    death()      { fileOr('death', 0.95, () => [392, 349, 294, 220].forEach((f, i) => setTimeout(() => blip(f, 0.3, 'triangle', 0.2), i * 160))); },
+    death()      { fileOr('death', 0.95, () => [392, 349, 294, 220].forEach((f, i) => cueLater(() => blip(f, 0.3, 'triangle', 0.2), i * 160))); },
     surge()      { duckFor(0.9); noise(0.5, 0.22, 480); blip(110, 0.5, 'sine', 0.18, 60); },
-    unlock()     { duckFor(1.2); fileOr('guardian-freed', 0.95, () => [659, 784, 988, 1319, 1568].forEach((f, i) => setTimeout(() => blip(f, 0.22, 'triangle', 0.2), i * 90))); },
-    combo(n)     { if (ok('combo', 60)) fileOr('combo-hit', Math.min(0.7, 0.3 + n * 0.01), () => blip(500 + Math.min(900, n * 22), 0.05, 'sine', 0.06, 90)); },
+    unlock()     { duckFor(1.2); fileOr('guardian-freed', 0.95, () => [659, 784, 988, 1319, 1568].forEach((f, i) => cueLater(() => blip(f, 0.22, 'triangle', 0.2), i * 90))); },
+    combo(n)     { if (combat && combat.focused) return; if (ok('combo', 250)) fileOr('combo-hit', Math.min(0.42, 0.2 + n * 0.004), () => blip(500 + Math.min(900, n * 22), 0.05, 'sine', 0.06, 90)); },
   };
   probeSfx();
   probeEncoded();
@@ -223,7 +265,7 @@ const Sound = (() => {
   // resume the WebAudio context after a phone lock / tab switch — otherwise
   // synth SFX silently die for the rest of the run
   document.addEventListener('visibilitychange', () => {
-    if (!document.hidden && ctx && ctx.state === 'suspended') ctx.resume().catch(() => {});
+    if (!document.hidden && !paused && ctx && ctx.state === 'suspended') ctx.resume().catch(() => {});
   });
 
   // ------- music: 2-bar island battle loop -------
@@ -247,7 +289,7 @@ const Sound = (() => {
       const n = ctx.createBufferSource();
       const buf = ctx.createBuffer(1, ctx.sampleRate * 0.04, ctx.sampleRate);
       const d = buf.getChannelData(0);
-      for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+      for (let i = 0; i < d.length; i++) d[i] = audioRandom() * 2 - 1;
       n.buffer = buf;
       const f = ctx.createBiquadFilter(); f.type = 'highpass'; f.frequency.value = 6000;
       const g = ctx.createGain(); g.gain.setValueAtTime(0.08, t); g.gain.exponentialRampToValueAtTime(0.001, t + 0.04);
@@ -281,14 +323,21 @@ const Sound = (() => {
 
   // ------- file-based audio (the real soundtrack from assets/audio) -------
   let musicEl = null, previewEl = null;
-  const fileCache = {};
 
-  let musicPath = null, duckUntil = 0, fadeTimer = null;
+
+  let musicPath = null, duckUntil = 0, duckDepth = 0.42, fadeTimer = null;
   // Duck the music under important cues so information cuts through the mix.
-  function duckFor(sec) { duckUntil = Math.max(duckUntil, performance.now() + sec * 1000); }
+  function duckFor(sec, depth=0.42) {
+    if(muted||sfxVol<=0||paused)return;
+    const now=performance.now();
+    duckDepth=now<duckUntil?Math.min(duckDepth,depth):depth;
+    duckUntil=Math.max(duckUntil,now+sec*1000);
+    if(musicEl)musicEl.volume=Math.min(musicEl.volume,musicTargetVol());
+    if(musicGain)musicGain.gain.setTargetAtTime(0.28*musicVol*duckDepth,ctx.currentTime,0.008);
+  }
   function musicTargetVol() {
     const ducked = performance.now() < duckUntil;
-    return musicBase * musicVol * (ducked ? 0.42 : 1);
+    return musicBase * musicVol * (ducked ? duckDepth : 1);
   }
   // Crossfade instead of a hard cut. Boss arrival — the biggest moment in a run
   // — used to have the emotional shape of changing a radio station.
@@ -324,13 +373,14 @@ const Sound = (() => {
       const k = Math.min(1, (performance.now() - t0) / (fade * 1000));
       if (musicEl === el) el.volume = Math.max(0, Math.min(1, musicTargetVol() * k));
       if (old) { old.volume = Math.max(0, old.volume * (1 - k)); if (k >= 1) { old.pause(); } }
-      if (k >= 1 && !old) clearInterval(fadeTimer), fadeTimer = setInterval(tickMusicVol, 120);
-      if (k >= 1 && old) { clearInterval(fadeTimer); fadeTimer = setInterval(tickMusicVol, 120); }
+      if (k >= 1 && !old) clearInterval(fadeTimer), fadeTimer = setInterval(tickMusicVol, 40);
+      if (k >= 1 && old) { clearInterval(fadeTimer); fadeTimer = setInterval(tickMusicVol, 40); }
     }, 40);
     stopSynthMusic();
   }
   function tickMusicVol() {
-    if (musicEl) musicEl.volume = Math.max(0, Math.min(1, musicTargetVol()));
+    if (musicEl) musicEl.volume = Math.max(0, Math.min(1, musicEl.volume + (musicTargetVol()-musicEl.volume)*0.22));
+    if(musicGain)musicGain.gain.setTargetAtTime(0.28*musicVol*(performance.now()<duckUntil?duckDepth:1),ctx.currentTime,0.12);
   }
   function stopMusic(fade) {
     stopSynthMusic();
@@ -350,16 +400,38 @@ const Sound = (() => {
     musicPath = null;
   }
   // Pause/resume for backgrounding — the loop used to keep playing during a call.
-  function pauseAll() { if (musicEl) musicEl.pause(); stopPreview(); stopFlourish(); }
-  function resumeAll() { if (musicEl) musicEl.play().catch(() => {}); }
-
+  function resetCombat() {
+    audioEpoch++; cancelCues(); if(combat)combat.stop(); stopSynthVoices();
+    for(const key of Object.keys(lastT))delete lastT[key];
+    duckUntil=0;
+  }
+  function pauseAll() {
+    paused=true; resetCombat();syncCombat();
+    if(musicEl)musicEl.pause();stopPreview();stopFlourish();
+    if(ctx && ctx.state==='running')ctx.suspend().catch(()=>{});
+  }
+  function resumeAll() {
+    paused=false;syncCombat();
+    if(ctx && ctx.state==='suspended')ctx.resume().catch(()=>{});
+    if(musicEl)musicEl.play().catch(()=>{});
+  }
   function playFile(path, vol) {
-    if (muted || sfxVol <= 0) return;
-    let a = fileCache[path];
-    if (!a) { a = new Audio(src(path)); fileCache[path] = a; }
-    a.volume = (vol === undefined ? 0.9 : vol) * sfxVol;
-    try { a.currentTime = 0; } catch (e) {}
-    a.play().catch(() => {});
+    if(!ctx||muted||paused||sfxVol<=0)return;
+    const defeat=/_defeat\./.test(path);
+    if(!ok('file:'+path,defeat?450:100))return;
+    const gain=(vol??0.9)*(defeat?0.55:1);
+    const emit=buffer=>combat.playBuffer(buffer,{gain,priority:defeat?1:3,group:'detail'});
+    const item=decoded.get(path);
+    if(item?.buffer){item.used=++cacheClock;emit(item.buffer);return;}
+    const epoch=audioEpoch, at=performance.now();
+    loadBuffer(path).then(buffer=>{
+      // First-use entrances can finish loading briefly; stale events never replay.
+      if(buffer && epoch===audioEpoch && performance.now()-at<180 && !paused && !muted && sfxVol>0)emit(buffer);
+    });
+  }
+  function prepareRun(id) {
+    for(const path of ['enemies/clubbo_defeat.wav','enemies/demonder_defeat.wav','enemies/glob_defeat.wav',
+      'enemies/glob_entrance.wav','sfx/glob_slam.wav',`heroes/${id}_entrance.wav`])loadBuffer('assets/audio/'+path);
   }
 
   // Hero theme previews. These are full 2-3 MB songs; tapping through the
@@ -430,20 +502,28 @@ const Sound = (() => {
     if (master) master.gain.value = muted ? 0 : 0.85;
     if (musicEl) musicEl.muted = muted;
     if (previewEl) previewEl.muted = muted;
+    if (flourishEl) flourishEl.muted = muted;
+    if(muted){audioEpoch++;cancelCues();stopSynthVoices();}
+    syncCombat();
     return muted;
   }
   function toggleMute() { return setMuted(!muted); }
   function setMusicVol(v) {
     musicVol = Math.max(0, Math.min(1, v));
-    if (musicEl) musicEl.volume = musicBase * musicVol;
-    if (musicGain) musicGain.gain.value = 0.28 * musicVol;
+    if (musicEl) musicEl.volume = musicTargetVol();
+    if (musicGain) musicGain.gain.value = 0.28 * musicVol * (performance.now()<duckUntil?duckDepth:1);
   }
   function setSfxVol(v) {
     sfxVol = Math.max(0, Math.min(1, v));
     if (sfxGain) sfxGain.gain.value = 0.7 * sfxVol;
+    if(sfxVol<=0){audioEpoch++;cancelCues();stopSynthVoices();}
+    syncCombat();
   }
 
   return { ensure, sfx: S, startMusic, stopMusic, playMusic, playFile, preview, stopPreview,
+    tick:()=>{if(combat)combat.flush();}, listener:(x,y,w)=>{if(combat)combat.listener(x,y,w);},
+    setGore:level=>{goreLevel=level;syncCombat();}, resetCombat, prepareRun,
+    audioStats:()=>({combat:combat?.stats(),synthVoices:synthVoices.size,decoded:decoded.size,decodedBytes:cacheBytes}),
     toggleMute, setMuted, setMusicVol, setSfxVol, duckFor, pauseAll, resumeAll, heroFlourish, stopFlourish,
     get muted() { return muted; }, get musicVol() { return musicVol; }, get sfxVol() { return sfxVol; } };
 })();
