@@ -172,7 +172,7 @@ test('HTML hooks, offline shell and production asset references are present', ()
   assert.equal(ids.length, new Set(ids).size, 'no duplicate element IDs');
   for (const match of html.matchAll(/(?:src|href)="([^"#]+)"/g)) {
     const ref = match[1]; if (/^(data:|https?:)/.test(ref)) continue;
-    assert(fs.existsSync(path.join(root, ref)), `missing ${ref}`);
+    assert(fs.existsSync(path.join(root, ref.split(/[?#]/)[0])), `missing ${ref}`);
   }
   const sw = fs.readFileSync(path.join(root,'sw.js'),'utf8');
   for (const asset of ['js/expedition.js','css/studio.css']) assert(sw.includes(asset));

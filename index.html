@@ -2,6 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
+<meta name="balitopia-build" content="4-red-splatter">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -12,8 +13,8 @@
 <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🏝</text></svg>">
 <link rel="apple-touch-icon" href="assets/img/icon-192.png">
 <link rel="manifest" href="manifest.json">
-<link rel="stylesheet" href="css/style.css">
-<link rel="stylesheet" href="css/studio.css">
+<link rel="stylesheet" href="css/style.css?v=4-red-splatter">
+<link rel="stylesheet" href="css/studio.css?v=4-red-splatter">
 </head>
 <body>
 
@@ -117,12 +118,11 @@
     <label class="set-row"><span>Screen shake</span><input type="range" id="set-shake" min="0" max="150" step="10"><b id="set-shake-v"></b></label>
     <label class="set-row"><span>Screen flash</span><input type="range" id="set-flash" min="0" max="100" step="10"><b id="set-flash-v"></b></label>
     <label class="set-row"><span>Monster gore</span>
-      <select id="set-gore"><option value="full">Full — blood &amp; chunks</option><option value="light">Light — fewer chunks</option><option value="off">Off</option></select></label>
-    <label class="set-row"><span>Damage numbers</span>
-      <select id="set-dmgnum"><option value="all">All</option><option value="big">Big only</option><option value="off">Off</option></select></label>
+      <select id="set-gore"><option value="full">Carnage — red splatter &amp; body chunks</option><option value="light">Light — fewer chunks</option><option value="off">Off</option></select></label>
     <label class="set-row"><span>Colour vision</span>
       <select id="set-cvd"><option value="none">Standard</option><option value="deut">Deuteranopia</option><option value="prot">Protanopia</option><option value="trit">Tritanopia</option></select></label>
     <label class="set-row toggle"><span>Assist mode (−35% damage taken)</span><input type="checkbox" id="set-assist"></label>
+    <p class="build-label">RED SPLATTER · BUILD 4</p>
     <div class="set-danger">
       <button class="menu-btn2" id="btn-export-save">EXPORT SAVE</button>
       <button class="menu-btn2" id="btn-import-save">IMPORT SAVE</button>
@@ -268,11 +268,12 @@
 <!-- ===== Rotate overlay ===== -->
 <div id="rotate-overlay"><div>⟳<br>Please rotate your device<br><small>Balitopia is played in landscape</small></div></div>
 
-<script src="js/data.js"></script>
-<script src="js/sprites.js"></script>
-<script src="js/audio.js"></script>
-<script src="js/expedition.js"></script>
-<script src="js/gore.js"></script>
-<script src="js/game.js"></script>
+<script src="js/data.js?v=4-red-splatter"></script>
+<script src="js/sprites.js?v=4-red-splatter"></script>
+<script src="js/audio.js?v=4-red-splatter"></script>
+<script src="js/expedition.js?v=4-red-splatter"></script>
+<script src="js/gore.js?v=4-red-splatter"></script>
+<script src="js/update.js?v=4-red-splatter"></script>
+<script src="js/game.js?v=4-red-splatter"></script>
 </body>
 </html>

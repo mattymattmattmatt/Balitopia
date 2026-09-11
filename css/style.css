@@ -542,20 +542,6 @@ html, body {
   position:absolute; inset:0; width:100%; height:100%; object-fit:cover; pointer-events:none; z-index:1;
 }
 
-#banner {
-  position:absolute; top:22%; left:50%; transform:translateX(-50%);
-  font-size:clamp(16px,4.5vh,28px); font-weight:bold; letter-spacing:2px; color:#ffd54f;
-  text-shadow:0 2px 0 #7a3c00, 0 4px 14px #000; text-align:center; white-space:nowrap;
-  animation:bannerPop 2.6s ease forwards;
-}
-@keyframes bannerPop {
-  0% { opacity:0; transform:translateX(-50%) scale(.6); }
-  12% { opacity:1; transform:translateX(-50%) scale(1.08); }
-  20% { transform:translateX(-50%) scale(1); }
-  80% { opacity:1; }
-  100% { opacity:0; transform:translateX(-50%) scale(1); }
-}
-
 /* ============ Rotate overlay ============ */
 #rotate-overlay {
   position:fixed; inset:0; z-index:99; background:#07131a;
@@ -572,41 +558,16 @@ html, body {
 }
 /* manual reduced-motion toggle (Settings) — mirrors the OS media query */
 body.reduce-motion .facecard.ready, body.reduce-motion .facecard .fc-zap,
-body.reduce-motion .newbest, body.reduce-motion #boss-eta, body.reduce-motion .mc-front span,
-body.reduce-motion #banner { animation:none !important; }
+body.reduce-motion .newbest, body.reduce-motion #boss-eta, body.reduce-motion .mc-front span { animation:none !important; }
 body.reduce-motion .facecard.ready { box-shadow:0 0 10px 3px var(--glow, #ffd54f); }
-body.reduce-motion #banner { transform:translateX(-50%) scale(1); opacity:1; }
 
 /* UI text scale (Settings) — now applied at the root so EVERY screen scales,
    not just the seven HUD elements it used to cover */
 :root { --ui-scale:1; --sal:env(safe-area-inset-left); }
 #hp-text, #lvl-text, #timer, #kills, #freed, #boss-eta { font-size:calc(1em * var(--ui-scale)); }
-#banner { font-size:calc(clamp(15px,4vh,26px) * var(--ui-scale)); }
 .select-title, .select-sub, .menu-btn, .menu-btn2, .set-row, .shop-mid, .rec-row,
 #howto-body, .mc-back h3, .mc-back p, .ach-tx, .hr-name, .sum-tile b, .goal, .kit-row
   { font-size:calc(1em * var(--ui-scale)); }
-
-/* ============ Banner: two lines, auto-shrink, clear of the action ============
-   It was `white-space:nowrap` at up to 28px, so the game's most exciting
-   announcements clipped off both edges of a narrow landscape screen. */
-#banner {
-  top:13%; white-space:normal; max-width:82vw; line-height:1.15;
-  text-wrap:balance;
-}
-
-/* ============ Coach cards (contextual onboarding) ============ */
-#coach {
-  position:absolute; left:50%; top:38%; transform:translate(-50%,-50%);
-  display:flex; flex-direction:column; align-items:center; gap:3px;
-  padding:12px 26px; border-radius:16px; pointer-events:none; z-index:12;
-  background:linear-gradient(rgba(9,26,24,.94), rgba(5,13,15,.96));
-  border:2px solid rgba(255,213,79,.7); box-shadow:0 8px 30px rgba(0,0,0,.6);
-  animation:coachIn .3s ease;
-}
-#coach b { font-size:clamp(13px,3.2vh,20px); letter-spacing:2px; color:#ffd54f; text-align:center; }
-#coach span { font-size:clamp(9px,2.1vh,12px); color:#b7dcd3; text-align:center; }
-@keyframes coachIn { from { opacity:0; transform:translate(-50%,-40%) scale(.9); } }
-body.reduce-motion #coach { animation:none; }
 
 /* ============ HUD additions ============ */
 #hud-meta { display:flex; align-items:center; gap:8px; margin-top:4px; }
@@ -822,7 +783,6 @@ body.reduce-motion .hero-unlocked span, body.reduce-motion #ps-btn.ready { anima
   .chest-card h3 { font-size:11px; } .chest-card p { font-size:9px; }
   .mut-card { width:168px; padding:11px 10px; }
   .mut-card h3 { font-size:13px; } .mut-card p { font-size:10px; }
-  #coach { padding:8px 18px; }
   #select-goals .sg { font-size:8.5px; padding:2px 7px; }
   .goal { padding:3px 8px; } .goal b { font-size:10px; } .goal span { font-size:8px; }
 }

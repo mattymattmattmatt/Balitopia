@@ -5,15 +5,17 @@ No engine, no dependencies, no build step — pure HTML5 canvas. Open `index.htm
 
 ## Gore and smoother explosions
 
-Enemy kills now spray blood and throw bouncing chunks. Explosions launch debris
-away from the blast; blood and landed remains stain the ground. **Monster gore**
-in Settings offers Full (default), Light and Off. Reduced motion keeps ground
+Enemy kills now burst into six pieces of their own artwork amid bright red spray.
+Larger scarlet splashes and bouncing body chunks coat the battlefield. Explosions launch debris
+away from the blast; blood and landed remains stain the scenery. **Monster gore**
+in Settings offers Carnage (default), Light and Off. Reduced motion keeps ground
 stains and removes airborne debris.
 
 The renderer uses simpler blasts, beams and particles, fewer scenery props,
 and bounded visual pools. Full-screen lighting and projectile trails are removed.
 Ordinary hits and screen-clearing powershots no longer freeze or slow combat.
-Centre-screen announcements and automatic coaching are gone; recent notices
+Floating damage, combo, ward, healing and charge text, centre-screen announcements
+and automatic coaching are gone; recent notices
 can be read in **Pause → Recent action**.
 
 Tide pushes, projectile wind drift, the closing arena and the Ebb Tide curse
@@ -105,8 +107,7 @@ entirely, and Cataclysm doubles the elites in its scheduled elite encounters.
 
 **⚙ Settings** cover music/SFX volume, vibration, reduced motion, colorblind pips and
 per-deficiency colour modes, UI text size, radar toggle, **control layout** (stick side, type,
-size, dead zone), **quality preset and frame cap**, screen shake and flash intensity, damage
-number density, **monster gore**, **assist mode**, and save export/import/erase.
+size, dead zone), **quality preset and frame cap**, screen shake and flash intensity, **monster gore**, **assist mode**, and save export/import/erase.
 
 - **Minyar** — endless, easy to squish, but they come in every size and color. Color = danger:
   green < blue < purple < pink < magma < gold.

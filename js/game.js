@@ -271,11 +271,17 @@ const projs = [];    for (let i = 0; i < MAX_PROJ; i++) projs.push({ alive: fals
 const ebullets = []; for (let i = 0; i < 80; i++) ebullets.push({ alive: false });
 const gems = [];     for (let i = 0; i < MAX_GEMS; i++) gems.push({ alive: false });
 const parts = [];    for (let i = 0; i < MAX_PARTS; i++) parts.push({ alive: false });
-let hearts = [], patches = [], effects = [], floaters = [], telegraphs = [];
+let hearts = [], patches = [], effects = [], telegraphs = [];
 let partCursor = 0;
 function configureGore() {
   gore.configure({ level: prefs.gore, motion: !!prefs.motion, bits: QL.gibs, tiles: QL.stainTiles, burst: QL.goreBurst });
 }
+function prepareGoreBodies() {
+  for (const base of ['minyar', 'demonder', 'clubbo'])
+    TIERS.forEach((_, tier) => gore.prepareBody(base + tier, Sprites.get(base + tier)));
+  gore.prepareBody('boss', Sprites.get('boss'));
+}
+
 function nearView(x, y, pad = 120) {
   if (!player) return false;
   const zoom = G.cam.zoom || 1;
@@ -443,7 +449,7 @@ function spawnEnemy(type, tier, x, y, elite) {
   e.kbx = 0; e.kby = 0; e.flash = 0;
   e.wob = Math.random() * 6.28;
   e.shootCd = e.ai === 'ranged' ? 1 + Math.random() : 0;   // spitter fire timer
-  e.fleeing = false; e._fl = null;
+  e.fleeing = false;
   e.elite = !!elite;
   e.affix = elite ? ELITE_AFFIXES[(Math.random() * ELITE_AFFIXES.length) | 0] : null;
   e.chargeCd = 3; e.buffCd = 2; e.burrowT = e.ai === 'burrow' ? 1.1 : 0;
@@ -550,24 +556,6 @@ function heraldEnemy(type) {
 }
 
 // ---------------- Damage ----------------
-function addFloater(x, y, txt, color, scale) {
-  if (floaters.length > 26) floaters.shift();
-  floaters.push({ x, y, txt, color, t: 0, s: scale || 1 });
-}
-// Repeated hits on the same enemy within 0.22s accumulate into ONE rising
-// number instead of spamming the screen — this is what lets every hit show a
-// number without the playfield turning into confetti.
-function addAggFloater(e, dmg, color) {
-  const f = e._fl;
-  if (f && f.t < 0.22 && floaters.includes(f)) {
-    f.acc += dmg; f.txt = Math.round(f.acc); f.t = Math.max(0, f.t - 0.08);
-    f.s = Math.min(1.35, 1 + f.acc / 400);
-    return;
-  }
-  const nf = { x: e.x + (Math.random() - 0.5) * 10, y: bodyY(e) - e.r - 8, txt: dmg, color, t: 0, s: 1, acc: dmg };
-  if (floaters.length > 26) floaters.shift();
-  floaters.push(nf); e._fl = nf;
-}
 // Particle kinds: spark (stretched to velocity), puff (soft additive), shard
 // (rotating), ring (expanding). Previously every effect in the game was the
 // same axis-aligned square.
@@ -644,14 +632,14 @@ function killEnemy(e, src, hit = {}) {
   G.comboScore += 10 * G.comboMul;      // kill score scales with the live combo
   if (G.combo > G.bestCombo) {
     G.bestCombo = G.combo;
-    if (G.combo % 10 === 0) { Sound.sfx.combo(G.combo); addFloater(player.x, player.y - 60, `×${G.combo}`, '#ffd54f', 1.3); }
+    if (G.combo % 10 === 0) Sound.sfx.combo(G.combo);
   }
   if (e.lastSrc != null && heroState[e.lastSrc]) heroState[e.lastSrc].kills++;
   if (e.elite) G.eliteKills++;
   if (e.type === 'golden') { spawnChest(e.x, e.y, 'gold'); banner('💰 THE GOLDEN ONE FALLS'); }
   else dropGem(e.x, e.y, e.xp * (G.diff && G.diff.rule === 'lean' ? 0.75 : 1) * (G.mut.xp || 1));
 
-  gore.burst(e.x, e.y, e.cyOff || 20, e.r, { ...hit, visible: nearView(e.x, e.y, 180) });
+  gore.burst(e.x, e.y, e.cyOff || 20, e.r, { ...hit, body: e.base + e.tier, visible: nearView(e.x, e.y, 250) });
 
   // lifesteal (Bloodtide upgrade + Swack's trait)
   const ls = G.mods.lifesteal + (src != null && HERO_TRAIT[HEROES[src].id].k === 'lifesteal' ? HERO_TRAIT[HEROES[src].id].v : 0);
@@ -770,7 +758,6 @@ function damageEnemy(e, dmg, o) {
   // called from anywhere — every hit in the game landed in total silence.
   Sound.sfx.hit(crit);
   if (crit) {
-    if (prefs.dmgnum !== 'off') addFloater(e.x, bodyY(e) - e.r - 10, Math.round(dmg), '#ffd54f', 1.5);
     spawnParts(e.x, bodyY(e), '#fff59d', 5, 190, 'spark');
     buzz(HAPTIC.crit);
     // Zappo's crits chain; Yellogen's crits shatter
@@ -779,10 +766,6 @@ function damageEnemy(e, dmg, o) {
       const n = nearestTarget(e.x, e.y, 190, false);
       if (n && n !== e) damageEnemy(n, dmg * 0.5, { src: o.src, noCrit: 1 });
     }
-  } else if (prefs.dmgnum !== 'off' && !(prefs.dmgnum === 'big' && dmg < 25)) {
-    // damage numbers used to be hidden for most of the screen; now every hit
-    // registers, but repeats on one enemy pool into a single rising number
-    addAggFloater(e, Math.round(dmg), e.ai === 'shielded' ? '#b0bec5' : '#fff');
   }
   if (e.hp <= 0) killEnemy(e, o.src, o);
 }
@@ -811,7 +794,6 @@ function damageBoss(dmg, o) {
   b.hp -= dmg; b.flash = 0.07;
   addDamage(o.src, dmg);
   if (o.slow) b.slowT = Math.max(b.slowT, o.slow * 0.3);
-  if (prefs.dmgnum !== 'off') addFloater(b.x + (Math.random() - 0.5) * 60, b.y - 90, Math.round(dmg), '#ffd54f');
   Sound.sfx.bossHit();
   if (b.hp <= 0) killBoss(b, o);
 }
@@ -823,7 +805,7 @@ function killBoss(b, hit = {}) {
   b.alive = false;
   G.bossKills++;
   G.shake = 18;
-  gore.burst(b.x, b.y, 70, 48, { ...hit, boss: true, blast: true, visible: nearView(b.x, b.y, 250) });
+  gore.burst(b.x, b.y, 70, 48, { ...hit, body: 'boss', boss: true, blast: true, visible: nearView(b.x, b.y, 250) });
   for (let i = 0; i < 6; i++)
     dropGem(b.x + (Math.random() - 0.5) * 120, b.y + (Math.random() - 0.5) * 90, 25);
   Sound.playFile('assets/audio/enemies/glob_defeat.wav', 1);
@@ -916,7 +898,6 @@ function hurtPlayer(dmg, srcName) {
     player.iv = 0.8;
     addEffect({ type: 'shock', x: player.x, y: player.y, r: 90, t: 0, dur: 0.4, color: '#80cbc4' });
     Sound.sfx.wardBreak(); buzz(HAPTIC.tick);
-    addFloater(player.x, player.y - 46, 'WARD', '#80cbc4', 1.2);
     return;
   }
   G.lastHurtBy = srcName || G.lastHurtBy;
@@ -2160,7 +2141,6 @@ function updatePickups(dt) {
       const healAmt = Math.max(20, Math.round(maxHP() * 0.2));   // scales with HP pool
       player.hp = Math.min(maxHP(), player.hp + healAmt);
       Sound.sfx.heal();
-      addFloater(player.x, player.y - 40, '+' + healAmt, '#69f0ae');
     }
   }
   for (let i = patches.length - 1; i >= 0; i--) {
@@ -2226,10 +2206,6 @@ function updatePickups(dt) {
   for (let i = effects.length - 1; i >= 0; i--) {
     effects[i].t += dt;
     if (effects[i].t > effects[i].dur) effects.splice(i, 1);
-  }
-  for (let i = floaters.length - 1; i >= 0; i--) {
-    floaters[i].t += dt;
-    if (floaters[i].t > 0.8) floaters.splice(i, 1);
   }
   for (const p of parts) {
     if (!p.alive) continue;
@@ -2547,8 +2523,6 @@ function render(dt) {
     for (let ty = y0; ty < camY + vh; ty += ts)
       ctx.drawImage(tile, tx, ty);
 
-  gore.drawGround(ctx, camX, camY, vw, vh);
-
   // world edge: a real coastline band rather than a stroked rectangle
   drawCoast(camX, camY, vw, vh);
 
@@ -2572,6 +2546,9 @@ function render(dt) {
       }
     }
   }
+
+  // Stains cover scenery as well as terrain, below threats and living actors.
+  gore.drawGround(ctx, camX, camY, vw, vh);
 
   pEnd(); pStart('world');
   // ---- ground pools (undertow / mines / volatile) ----
@@ -2978,8 +2955,6 @@ function render(dt) {
   drawBoss(G.boss);
   drawBoss(G.boss2);
 
-  gore.drawAir(ctx, onScreen);
-
   pEnd(); pStart('projs');
   // ---- projectiles: oriented, per-archetype sprites with trails ----
   for (const p of projs) {
@@ -3003,15 +2978,6 @@ function render(dt) {
       ctx.restore();
     }
   }
-  // enemy bullets — magenta/white with a dark outline, per the threat colour law.
-  // They used to be #7cb342 on #2f6b3d ground: a contrast ratio near 2:1, which
-  // made them effectively undodgeable.
-  const ebs = Sprites.get('ebullet');
-  for (const eb of ebullets) {
-    if (!eb.alive || !onScreen(eb.x, eb.y, 40)) continue;
-    ctx.drawImage(ebs, eb.x - ebs.width / 2, eb.y - ebs.height / 2);
-  }
-
   pEnd(); pStart('effects');
   // ---- effects ----
   for (const fx of effects) {
@@ -3160,26 +3126,17 @@ function render(dt) {
   }
   ctx.globalAlpha = 1;
 
-  pEnd(); pStart('floaters');
-  // ---- floaters ----
-  // Text draws are the most expensive per-item work in the frame. Bucket the
-  // size so ctx.font changes a few times instead of once per number, cull
-  // off-screen, and drop the drop-shadow pass under a heavy horde.
-  if (floaters.length) {
-    ctx.textAlign = 'center';
-    const cheap = floaters.length > 18;
-    let curSz = -1;
-    for (const fl of floaters) {
-      if (!onScreen(fl.x, fl.y, 40)) continue;
-      const sz = fl.s > 1.3 ? 20 : 15;
-      if (sz !== curSz) { curSz = sz; ctx.font = `bold ${sz}px "Trebuchet MS",sans-serif`; }
-      ctx.globalAlpha = 1 - fl.t / 0.8;
-      const ry = fl.y - fl.t * 40 - (fl.s > 1.3 ? fl.t * 14 : 0);
-      if (!cheap) { ctx.fillStyle = '#000'; ctx.fillText(fl.txt, fl.x + 1.5, ry + 1.5); }
-      ctx.fillStyle = fl.color;
-      ctx.fillText(fl.txt, fl.x, ry);
-    }
-    ctx.globalAlpha = 1;
+  pEnd(); pStart('gore');
+  // Blood and body pieces remain visible above bright weapon effects.
+  gore.drawAir(ctx, onScreen);
+
+  // enemy bullets — magenta/white with a dark outline, per the threat colour law.
+  // They used to be #7cb342 on #2f6b3d ground: a contrast ratio near 2:1, which
+  // made them effectively undodgeable.
+  const ebs = Sprites.get('ebullet');
+  for (const eb of ebullets) {
+    if (!eb.alive || !onScreen(eb.x, eb.y, 40)) continue;
+    ctx.drawImage(ebs, eb.x - ebs.width / 2, eb.y - ebs.height / 2);
   }
 
   pEnd(); pStart('hud2');
@@ -3597,7 +3554,6 @@ function tryPowershot() {
   const els = stripCards.get(player.heroIdx);
   if (els) flashEl(els.card);
   G.powerDeny = 0.5;
-  addFloater(player.x, player.y - 52, `${Math.round((hs ? hs.charge : 0) * 100)}%`, '#80cbc4', 1.1);
   return false;
 }
 
@@ -4108,7 +4064,7 @@ function newGame(heroIdx, diffIdx, daily) {
   G.seed = (daily ? dayKey().replace(/-/g, '').slice(2) : (pendingSeed || makeSeed()));
   pendingSeed = null;
   G.rng = mulberry32(seedToInt(G.seed));
-  configureGore(); gore.reset(seedToInt(G.seed));
+  configureGore(); prepareGoreBodies(); gore.reset(seedToInt(G.seed));
   G.daily = daily || null;
   G.diff = DIFFICULTIES[Math.max(0, Math.min(DIFFICULTIES.length - 1, diffIdx | 0))];
   G.startHero = heroIdx;
@@ -4145,7 +4101,7 @@ function newGame(heroIdx, diffIdx, daily) {
   for (const g of gems) g.alive = false;
   for (const p of parts) p.alive = false;
   for (const eb of ebullets) eb.alive = false;
-  hearts = []; patches = []; effects = []; floaters = []; telegraphs = [];
+  hearts = []; patches = []; effects = []; telegraphs = [];
   allies = [];
   freedSet = new Set([heroIdx]);
 
@@ -4791,7 +4747,6 @@ function bindSettings() {
     $('set-shake').value = prefs.shake; $('set-shake-v').textContent = prefs.shake + '%';
     $('set-flash').value = prefs.flash; $('set-flash-v').textContent = prefs.flash + '%';
     $('set-gore').value = prefs.gore;
-    $('set-dmgnum').value = prefs.dmgnum;
     $('set-cvd').value = prefs.cvd;
     $('set-assist').checked = !!prefs.assist;
   };
@@ -4800,7 +4755,9 @@ function bindSettings() {
     prefs[key] = +e.target.value; $(id + '-v').textContent = prefs[key] + '%'; savePrefs();
   });
   const bindSel = (id, key, num) => $(id).addEventListener('change', e => {
-    prefs[key] = num ? +e.target.value : e.target.value; savePrefs(); Sound.sfx.uiSelect();
+    prefs[key] = num ? +e.target.value : e.target.value; savePrefs();
+    if (key === 'gore') prepareGoreBodies();
+    Sound.sfx.uiSelect();
   });
   bindRange('set-sticksize', 'stickSize');
   bindRange('set-deadzone', 'deadzone');
@@ -4818,7 +4775,6 @@ function bindSettings() {
     applyQuality(prefs.quality === 'auto' ? initialQuality() : prefs.quality);
   });
   bindSel('set-fps', 'fpsCap', true);
-  bindSel('set-dmgnum', 'dmgnum');
   bindSel('set-cvd', 'cvd');
   $('set-assist').addEventListener('change', e => { prefs.assist = e.target.checked ? 1 : 0; savePrefs(); });
   $('set-music').addEventListener('input', e => { prefs.musicVol = +e.target.value; $('set-music-v').textContent = prefs.musicVol + '%'; savePrefs(); });
@@ -5040,7 +4996,7 @@ const confirmModal = (title, body, onYes, yesLabel) =>
 const PREF_DEFAULTS = {
   musicVol: 80, sfxVol: 100, haptics: 1, motion: 1, colorblind: 0, uiscale: 100, minimap: 1,
   stickSide: 'left', stickType: 'float', stickSize: 100, deadzone: 0,
-  quality: 'auto', fpsCap: 60, shake: 65, flash: 25, dmgnum: 'big', cvd: 'none', assist: 0, gore: 'full',
+  quality: 'auto', fpsCap: 60, shake: 65, flash: 25, cvd: 'none', assist: 0, gore: 'full',
 };
 let prefs = { ...PREF_DEFAULTS };
 function loadPrefs() {
@@ -5498,11 +5454,8 @@ Sprites.init().then(() => {
   document.body.dataset.ready = '1';
 });
 
-// Service worker: makes a second visit instant, enables offline play, and is a
-// hard prerequisite for the install prompt (and therefore for iOS fullscreen).
-if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
-  window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));
-}
+// An update can reload a menu, but must never discard an active or paused run.
+AppUpdates.start({ canReload: () => !player || !$('screen-title').classList.contains('hidden') || (G.over && !$('screen-over').classList.contains('hidden')), beforeReload: flushSave });
 
 // debug/testing handle
 window.__balitopia = {
