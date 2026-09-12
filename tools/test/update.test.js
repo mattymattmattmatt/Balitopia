@@ -9,7 +9,7 @@ function workerHost() {
   const events={}, stores=new Map(), requests=[];
   const base='https://example.test/Balitopia/sw.js';
   const key=r=>new URL(typeof r==='string'?r:r.url,base).href;
-  let offline=false, missing=false, skipped=0, claimed=0, updates=0, build='5-impact-audio';
+  let offline=false, missing=false, skipped=0, claimed=0, updates=0, build='6-crownfall';
   const response=text=>new Response(text,{status:200});
   const net=async req=>{ requests.push(req); if(offline) throw Error('offline'); if(missing && req.url.includes('gore.js')) return new Response('',{status:404}); return response('fresh:'+key(req)+`<meta name="balitopia-build" content="${build}">`); };
   const caches={
@@ -43,7 +43,7 @@ test('offline worker installs the complete versioned shell while bypassing stale
   const h=workerHost(); await h.dispatch('install');
   assert.equal(h.counts().skipped,1); assert(h.requests.every(r=>r.cache==='reload'));
   const html=fs.readFileSync(path.join(root,'index.html'),'utf8');
-  assert(html.includes('<meta name="balitopia-build" content="5-impact-audio">'));
+  assert(html.includes('<meta name="balitopia-build" content="6-crownfall">'));
   for(const [,asset] of html.matchAll(/(?:src|href)="((?:js|css)\/[^\"]+)"/g))
     assert(h.requests.some(r=>r.url.endsWith('/'+asset)),asset+' is precached under its exact version');
   await h.caches.open('balitopia-shell-v3-gore'); await h.caches.open('unrelated-app');
@@ -59,13 +59,13 @@ test('a partial shell cannot replace the currently working offline build',async(
 
 test('navigation refreshes online and falls back offline, and never returns HTML for a missing script',async()=>{
   const h=workerHost(); await h.dispatch('install');
-  const shell=await h.caches.open('balitopia-shell-v5-impact-audio');
+  const shell=await h.caches.open('balitopia-shell-v6-crownfall');
   await shell.put('./index.html',new Response('old entry'));
   const online=await h.fetchEvent('./','navigate'); assert.match(await online.text(),/^fresh:/);
   assert.equal(h.requests.at(-1).cache,'no-store');
   h.offline(true);
   const offline=await h.fetchEvent('./','navigate'); assert.match(await offline.text(),/^fresh:/);
-  const js=await h.fetchEvent('./js/gore.js?v=5-impact-audio'); assert.match(await js.text(),/gore.js/);
+  const js=await h.fetchEvent('./js/gore.js?v=6-crownfall'); assert.match(await js.text(),/gore.js/);
   await assert.rejects(h.fetchEvent('./js/missing.js'),/offline/);
 });
 
@@ -97,10 +97,10 @@ test('a first installation does not reload or interrupt the first run',()=>{
 
 test('a newer HTML entry waits for its matching worker instead of mixing releases',async()=>{
   const h=workerHost(); await h.dispatch('install');
-  h.build('6-next');
+  h.build('7-next');
   const old=await h.fetchEvent('./','navigate');
-  assert.match(await old.text(),/content="5-impact-audio"/);
+  assert.match(await old.text(),/content="6-crownfall"/);
   assert.equal(h.counts().updates,1);
   h.offline(true);
-  assert.match(await (await h.fetchEvent('./','navigate')).text(),/content="5-impact-audio"/);
+  assert.match(await (await h.fetchEvent('./','navigate')).text(),/content="6-crownfall"/);
 });

@@ -1,7 +1,7 @@
 {
-  "name": "Balitopia — Guardians of the Broken Cages",
+  "name": "Balitopia — Crownfall",
   "short_name": "Balitopia",
-  "description": "Break the cages, free the Guardians, and make the Hungry King go hungry.",
+  "description": "Free your squad, overload three Crown Engines, steal their powers and overthrow King Glob.",
   "start_url": "./index.html",
   "scope": "./",
   "display": "fullscreen",

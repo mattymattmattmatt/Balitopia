@@ -1,5 +1,7 @@
 # Balitopia — expedition overhaul
 
+The current default run is the objective-driven Crownfall raid. The timed finite-run rules below describe the earlier build. See [CROWNFALL.md](CROWNFALL.md). Settings now shows **CROWNFALL · BUILD 6**.
+
 The subsequent [gore and performance update](GORE_PERFORMANCE.md) removes
 environmental hazards and combat popups, and replaces the lighting-heavy
 effects with bounded gore and simpler blasts. This document describes the

@@ -2,19 +2,19 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="balitopia-build" content="5-impact-audio">
+<meta name="balitopia-build" content="6-crownfall">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<title>Balitopia: Guardians of the Broken Cages</title>
+<title>Balitopia: Crownfall</title>
 <meta name="theme-color" content="#07131a">
-<meta name="description" content="Balitopia — break the cages, free the Guardians, and make the Hungry King go hungry. A mobile survivor-roguelite you can play in your browser.">
+<meta name="description" content="Free your squad, overload three Crown Engines and steal their powers. Turn the horde into fuel and overthrow King Glob in this mobile survivor roguelite.">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🏝</text></svg>">
 <link rel="apple-touch-icon" href="assets/img/icon-192.png">
 <link rel="manifest" href="manifest.json">
-<link rel="stylesheet" href="css/style.css?v=5-impact-audio">
-<link rel="stylesheet" href="css/studio.css?v=5-impact-audio">
+<link rel="stylesheet" href="css/style.css?v=6-crownfall">
+<link rel="stylesheet" href="css/studio.css?v=6-crownfall">
 </head>
 <body>
 
@@ -30,6 +30,7 @@
       <span id="relic-hud"></span>
       <span id="rally-hud" class="hidden">RALLY</span>
     </div>
+    <div id="fury-meter" class="hidden"><span id="fury-label">FURY · chain kills</span><div><i id="fury-fill"></i></div></div>
   </div>
   <div id="hud-top-center">
     <div id="run-phase">EXPEDITION · ASSEMBLE</div>
@@ -60,13 +61,13 @@
 
 <!-- ===== Title (VS key art + menu) ===== -->
 <div id="screen-title" class="screen">
-  <header class="home-top"><span class="island-mark">B / 24</span><span>GUARDIANS OF THE BROKEN CAGES</span><div id="home-wallet" aria-label="Shell balance">0 shells</div></header>
+  <header class="home-top"><span class="island-mark">B / 24</span><span>CROWNFALL</span><div id="home-wallet" aria-label="Shell balance">0 shells</div></header>
   <div class="home-layout">
     <div class="home-main">
-      <div id="title-logo"><p class="eyebrow">THE ISLAND NEEDS YOU</p><h1>BALITOPIA</h1><h2>One Guardian. A whole lot of trouble.</h2></div>
-      <p class="home-premise">Break the cages. Build your squad.<br>Take back the island.</p>
+      <div id="title-logo"><p class="eyebrow">STEAL BACK THE ISLAND'S POWER</p><h1>BALITOPIA</h1><h2>Break the engines. Break the king.</h2></div>
+      <p class="home-premise">Free your squad. Turn the horde into fuel.<br>Three engines stand between you and the crown.</p>
       <nav id="title-menu" aria-label="Main menu">
-        <button class="menu-btn primary-play" id="btn-menu-start"><span>PLAY</span><small>Choose your expedition</small><i aria-hidden="true">›</i></button>
+        <button class="menu-btn primary-play" id="btn-menu-start"><span>START A RAID</span><small>Three stolen powers. One final reckoning.</small><i aria-hidden="true">›</i></button>
         <button class="menu-btn hidden quick-play" id="btn-menu-continue">QUICK PLAY <span>Last loadout ↗</span></button>
         <div class="home-actions">
           <button class="menu-btn" id="btn-menu-daily"><b>☀</b><span>Daily challenge<small id="home-daily">One island. One shared challenge.</small></span></button>
@@ -122,7 +123,7 @@
     <label class="set-row"><span>Colour vision</span>
       <select id="set-cvd"><option value="none">Standard</option><option value="deut">Deuteranopia</option><option value="prot">Protanopia</option><option value="trit">Tritanopia</option></select></label>
     <label class="set-row toggle"><span>Assist mode (−35% damage taken)</span><input type="checkbox" id="set-assist"></label>
-    <p class="build-label">IMPACT AUDIO · BUILD 5</p>
+    <p class="build-label">CROWNFALL · BUILD 6</p>
     <div class="set-danger">
       <button class="menu-btn2" id="btn-export-save">EXPORT SAVE</button>
       <button class="menu-btn2" id="btn-import-save">IMPORT SAVE</button>
@@ -152,7 +153,7 @@
   <div id="story-panel">
     <div class="story-head">
       <span class="story-flourish">✦</span>
-      <h2 id="story-title">The Fall of Balitopia</h2>
+      <h2 id="story-title">The Crown That Ate the Island</h2>
       <span class="story-flourish">✦</span>
     </div>
     <div id="story-box"></div>
@@ -176,6 +177,7 @@
     </section>
   </div>
   <div id="select-goals"></div>
+  <div id="raid-brief"><b>YOUR RAID</b><span>01 · Free a squad</span><span>02 · Overload 3 engines</span><span>03 · Break the crown</span><small>Kills build Fury. Full Fury means rapid blast recharges.</small></div>
   <div class="expedition-launch">
     <label>RUN<select id="run-mode" aria-label="Run mode"></select></label>
     <label>ISLAND<select id="run-route" aria-label="Island route"></select></label>
@@ -197,6 +199,7 @@
   <h2 class="select-title">GUARDIANS</h2>
   <p class="select-sub">Tap a freed Guardian to possess them — costs ✦ Soul, grants a 3s Soulburn</p>
   <div id="run-contracts"></div>
+  <details id="crown-journal" class="hidden"></details>
   <details id="combat-notices"><summary>Recent action</summary><p id="combat-log"></p></details>
   <div id="roster-build"></div>
   <div id="roster-grid"></div>
@@ -208,6 +211,14 @@
 </div>
 
 <!-- ===== Level Up ===== -->
+<div id="screen-crown" class="screen hidden">
+  <p class="eyebrow">THE KING'S POWER IS YOURS</p>
+  <h2 id="crown-reward-title"></h2>
+  <p id="crown-reward-story"></p>
+  <div id="crown-choices"></div>
+  <p id="crown-reward-next"></p>
+</div>
+
 <div id="screen-levelup" class="screen hidden">
   <p class="eyebrow">MAKE THIS BUILD YOURS</p><h2 class="select-title">CHOOSE YOUR NEXT POWER</h2><p id="draft-subtitle"></p>
   <div id="upgrade-row"></div>
@@ -268,13 +279,14 @@
 <!-- ===== Rotate overlay ===== -->
 <div id="rotate-overlay"><div>⟳<br>Please rotate your device<br><small>Balitopia is played in landscape</small></div></div>
 
-<script src="js/data.js?v=5-impact-audio"></script>
-<script src="js/sprites.js?v=5-impact-audio"></script>
-<script src="js/combat-audio.js?v=5-impact-audio"></script>
-<script src="js/audio.js?v=5-impact-audio"></script>
-<script src="js/expedition.js?v=5-impact-audio"></script>
-<script src="js/gore.js?v=5-impact-audio"></script>
-<script src="js/update.js?v=5-impact-audio"></script>
-<script src="js/game.js?v=5-impact-audio"></script>
+<script src="js/data.js?v=6-crownfall"></script>
+<script src="js/sprites.js?v=6-crownfall"></script>
+<script src="js/combat-audio.js?v=6-crownfall"></script>
+<script src="js/audio.js?v=6-crownfall"></script>
+<script src="js/expedition.js?v=6-crownfall"></script>
+<script src="js/crownfall.js?v=6-crownfall"></script>
+<script src="js/gore.js?v=6-crownfall"></script>
+<script src="js/update.js?v=6-crownfall"></script>
+<script src="js/game.js?v=6-crownfall"></script>
 </body>
 </html>

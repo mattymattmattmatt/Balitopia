@@ -1,7 +1,23 @@
-# 🏝 BALITOPIA — Guardians of the Broken Cages
+# 🏝 BALITOPIA — Crownfall
 
 A Vampire-Survivors-style horde survival game built for **mobile phones in landscape mode**.
 No engine, no dependencies, no build step — pure HTML5 canvas. Open `index.html` and play.
+
+## Crownfall — mechanics and story overhaul
+
+Lead a raid against three **Crown Engines**. Fight inside each marked ring,
+defeat its keeper, then claim one of three stolen powers. Break all three to
+bring out King Glob. Your actions advance the raid.
+
+Nearby kills fill **Fury**. At full Fury, an eight-second **Rampage** gives a
+ready powershot, rapid blast recharges and faster dash recovery. Every raid
+starts with a blast ready, and rescued Guardians arrive fully charged.
+Choose powers that create corpse chain reactions, repeat powershots, explosive
+dashes, shields, healing or longer Rampages. The story unfolds through the
+engines, reward choices, optional pause journal and the ending.
+
+See [CROWNFALL.md](CROWNFALL.md) for the rules, choices and validation.
+[Watch the Canvas gameplay capture](docs/crownfall-gameplay.mp4).
 
 ## Gore and smoother explosions
 
@@ -26,12 +42,12 @@ See [GORE_PERFORMANCE.md](GORE_PERFORMANCE.md) for budgets and verification.
 
 The game now opens into a redesigned Guardian and expedition flow:
 
-- **Expedition:** King Glob arrives at 6:00. Defeat him to finish and bank the win.
-- **Blitz:** King Glob arrives at 3:00, encounters advance twice as quickly and gems grant 65% more XP. Score multiplier: 0.8×.
+- **Crownfall:** overload all three engines and choose their powers to summon King Glob. Defeat him to bank the win.
+- **Blitz:** a shorter raid with smaller engine quotas, faster enemy progression and 65% more XP. Score multiplier: 0.8×.
 - **Endless:** the original escalating boss / curse loop, with no fixed finish.
 - Choose **Emerald Wilds**, **Sapphire Coast** or **Sunspire Heights**, then a **Tidekeeper**, **Stormcaller** or **Pathfinder** blessing. Daily Challenges keep their fixed setup and ignore blessings and Shrine perks.
 - Three run objectives reward 30 shells each: rescue three Guardians, defeat 120 enemies, and fire three powershots. A non-daily victory adds 60 shells. Earn all three objectives and win for an S grade.
-- Every third rescue triggers an **8-second Squad Rally**: +30% Guardian weapon damage, a nearby gem vacuum, and +35% powershot charge. Each rescue restores one Soul and gives the rescued Guardian at least 65% powershot charge.
+- Every third rescue triggers an **8-second Squad Rally**: +30% Guardian weapon damage, a nearby gem vacuum, and +35% powershot charge. Each rescue restores one Soul and gives the rescued Guardian a fully charged powershot in raids (65% in Endless/Daily).
 - All eight relics can **evolve** at level IV with a matching squad upgrade. Recipes are printed on draft cards, and the matching upgrade is highlighted when a relic is owned.
 - **Run it back** immediately replays the same loadout; **Change Guardian** opens the full setup. Old saves migrate without removing unlocks, records, perks or shells.
 
@@ -39,23 +55,18 @@ See [STUDIO_OVERHAUL.md](STUDIO_OVERHAUL.md) for the complete evolution table, v
 
 ## 📖 The Story
 
-Far across the warm seas lies **Balitopia** — an island where the volcano sleeps politely,
-the surf is always up, and twenty-four **Guardians** keep the Balance of sun, sea, jungle and stone.
+The night King Glob crowned himself, the village hearths went cold and the
+harbour fell silent. Twenty-three Guardians were locked in cages, their magic
+pumped through three Crown Engines to feed his throne. One cage was empty.
+Yours.
 
-Then the mountain burped. From a crack beneath Mount Karang oozed **King Glob**, the Hunger
-That Walks — a grinning mountain of living slime that eats color, music, and everything in
-between. His spawn poured out with him: the cackling **Minyar** swarming the beaches, the horned
-**Demonders** stalking the jungle, and the colossal **Clubbos** flattening whole villages with
-one lazy swing.
+Every creature in Glob's horde carries stolen island magic. Kill them near an
+engine and the power rushes back into it. Overload the machine, defeat its
+keeper, and take a stolen power for your squad.
 
-One by one the Guardians fell, sealed inside cursed bamboo cages and scattered across the
-island — their trapped magic drip-feeding the King's bottomless appetite.
-
-But cursed cages have one flaw the King never noticed: **they break from the outside.**
-
-One Guardian slipped the ambush. You. Break every cage. Every Guardian you free fights at your
-side — and their body is yours to possess with a touch. Gather your kin, drown the horde, and
-when the ground begins to shake... make the Hunger go hungry.
+The Ember Kiln holds the village fires. The Drowned Choir holds its songs.
+The Hollow Spire holds the last chain to the crown. Break them, free whoever
+you can, and force the king to fight for his throne.
 
 ## 🎮 How to Play
 

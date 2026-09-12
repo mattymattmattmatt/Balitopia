@@ -260,3 +260,59 @@ button:disabled { cursor:default; opacity:.45; }
 body.reduce-motion *, body.reduce-motion *::before, body.reduce-motion *::after { animation-duration:.01ms !important; transition-duration:.01ms !important; }
 
 .build-label { color:#f17980; font-size:11px; letter-spacing:1px; text-align:center; margin:18px 0 8px; }
+
+/* Crownfall: fixed combat feedback and deliberate, paused reward choices. */
+#raid-brief { display:flex; align-items:center; justify-content:center; flex-wrap:wrap; gap:7px 16px; width:100%; padding:8px 0; color:var(--muted); font-size:12px; }
+#raid-brief b { color:var(--gold); font-size:11px; letter-spacing:.08em; }
+#raid-brief span { color:var(--text); }
+#raid-brief small { color:var(--mint); font-size:12px; }
+#fury-meter { margin-top:5px; width:100%; max-width:200px; color:#ffb075; }
+#fury-label { display:block; font-size:10px; font-weight:800; letter-spacing:.04em; line-height:1.3; }
+#fury-meter > div { height:5px; margin-top:3px; background:#231a20; border:1px solid #ffad7340; border-radius:4px; overflow:hidden; }
+#fury-fill { display:block; width:0; height:100%; background:#e99754; }
+#fury-meter.rampage { color:#ff8d9c; }
+#fury-meter.rampage #fury-fill { background:#ff647a; }
+.crownfall #run-phase { font-size:12px; letter-spacing:.03em; }
+.crownfall #run-objective { font-size:11px; line-height:1.3; max-width:225px; }
+#screen-crown { justify-content:center; gap:10px; padding:18px max(18px,env(safe-area-inset-right)) 18px max(18px,env(safe-area-inset-left)); background:radial-gradient(ellipse at 50% 0,#60433755,transparent 70%),#081a23f7; overflow-y:auto; }
+#screen-crown > .eyebrow { color:var(--gold); margin:0; font-size:11px; }
+#crown-reward-title { margin:0; font-size:clamp(20px,4.5vh,32px); letter-spacing:.035em; color:var(--text); text-align:center; }
+#crown-reward-story { max-width:780px; margin:0; font-size:14px; line-height:1.4; text-align:center; color:var(--muted); }
+#crown-choices { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:14px; width:min(960px,100%); }
+.crown-choice { display:flex; flex-direction:column; align-items:flex-start; gap:8px; min-width:0; min-height:200px; padding:18px; text-align:left; color:var(--text); background:linear-gradient(145deg,#294540,#142c34); border:1px solid #e3bc7750; border-top:3px solid var(--gold); border-radius:12px; cursor:pointer; font:inherit; touch-action:manipulation; }
+.crown-choice:hover, .crown-choice:focus-visible { background:#34594d; outline:2px solid var(--mint); outline-offset:2px; }
+.crown-choice:active { transform:translateY(2px); }
+.crown-choice-tag { font-size:10px; letter-spacing:.08em; font-weight:800; color:var(--gold); }
+.crown-choice i { font-style:normal; font-size:32px; line-height:1; color:var(--mint); }
+.crown-choice b { font-size:19px; line-height:1.1; }
+.crown-choice > span:not(.crown-choice-tag) { font-size:14px; line-height:1.45; color:#d9e5e3; }
+.crown-choice small { display:block; width:100%; padding-top:10px; border-top:1px solid #fff2; font-size:11px; margin-top:auto; color:var(--gold); font-weight:800; }
+#crown-reward-next { font-size:12px; margin:0; color:var(--gold); text-align:center; }
+#crown-journal { width:min(880px,96%); text-align:left; padding:12px; margin:2px 0 8px; background:#102a33; border:1px solid var(--line); border-radius:10px; }
+#crown-journal summary { color:var(--gold); cursor:pointer; font-size:12px; min-height:28px; line-height:28px; font-weight:800; }
+#crown-journal h3 { color:var(--mint); font-size:12px; margin:10px 0 5px; }
+#crown-journal p { color:var(--muted); font-size:13px; line-height:1.5; margin:4px 0 10px; }
+.journal-chapter { padding:8px 12px; border-left:2px solid #35515b; margin-top:8px; }
+.journal-chapter b { font-size:13px; color:#71858c; }
+.journal-chapter.known { border-left-color:var(--gold); }
+.journal-chapter.known b { color:var(--text); }
+.crown-coda { max-width:750px; margin:12px auto; padding:12px; background:#17333a; border:1px solid var(--line); border-radius:10px; }
+.crown-coda b { font-size:13px; color:var(--gold); }
+.crown-coda p { font-size:13px; line-height:1.5; color:var(--muted); margin:6px 0 0; }
+@media (max-height:500px) and (orientation:landscape) {
+  #screen-crown { gap:7px; padding-top:10px; padding-bottom:10px; }
+  #crown-reward-story { font-size:12px; line-height:1.3; }
+  .crown-choice { min-height:168px; padding:12px; gap:6px; }
+  .crown-choice b { font-size:16px; }
+  .crown-choice i { font-size:25px; }
+  .crown-choice > span:not(.crown-choice-tag) { font-size:12px; line-height:1.35; }
+  .crown-choice small { padding-top:7px; }
+  #raid-brief { padding:5px 0; gap:5px 12px; font-size:11px; }
+  #raid-brief small { display:none; }
+}
+@media (max-height:360px) and (orientation:landscape) {
+  #screen-crown > .eyebrow { display:none; }
+  #crown-reward-title { font-size:18px; }
+  #crown-choices { gap:8px; }
+  .crown-choice { min-height:150px; padding:10px; gap:4px; }
+}

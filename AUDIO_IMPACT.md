@@ -1,5 +1,7 @@
 # Impact audio — build 5
 
+Build 6 retains this audio and adds the Crownfall raid, Fury and stolen powers. See [CROWNFALL.md](CROWNFALL.md). Settings now shows **CROWNFALL · BUILD 6**.
+
 Ordinary explosions had no dedicated sound. Most common-enemy deaths were
 silent, and the recorded effects bypassed the effects-volume slider. This
 update gives every nearby explosion and death an audible contribution, with
