@@ -3,6 +3,14 @@
 A Vampire-Survivors-style horde survival game built for **mobile phones in landscape mode**.
 No engine, no dependencies, no build step — pure HTML5 canvas. Open `index.html` and play.
 
+## Crowded combat — build 7
+
+Fixes the runaway rainbow sprite cache, slow Auto-quality response and refresh
+cap. Dense kills share overlapping blood spray; chunks and persistent ground
+stains remain. Lower presets reduce shadows, pixel count and per-frame painting.
+See [PERFORMANCE.md](PERFORMANCE.md) for measured comparisons and device-testing
+limits. The current Settings label is **CROWNFALL · BUILD 7**.
+
 ## Crownfall — mechanics and story overhaul
 
 Lead a raid against three **Crown Engines**. Fight inside each marked ring,

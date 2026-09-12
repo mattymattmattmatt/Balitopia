@@ -1,16 +1,16 @@
 // A versioned, atomic game shell. Navigations check the network; versioned
 // scripts/CSS remain cache-first. Existing saves live in localStorage.
-const VERSION = 'v6-crownfall';
+const VERSION = 'v7-performance';
 const SHELL = 'balitopia-shell-' + VERSION;
 const MEDIA = 'balitopia-media-' + VERSION;
 const MEDIA_MAX = 60;
 const SHELL_FILES = [
   './', './index.html', './manifest.json',
   './assets/img/title_vs.jpg', './assets/img/story_bg.jpg',
-  './css/style.css?v=6-crownfall', './css/studio.css?v=6-crownfall',
-  './js/data.js?v=6-crownfall', './js/sprites.js?v=6-crownfall',
-  './js/combat-audio.js?v=6-crownfall', './js/audio.js?v=6-crownfall', './js/expedition.js?v=6-crownfall', './js/crownfall.js?v=6-crownfall',
-  './js/gore.js?v=6-crownfall', './js/update.js?v=6-crownfall', './js/game.js?v=6-crownfall',
+  './css/style.css?v=7-performance', './css/studio.css?v=7-performance',
+  './js/data.js?v=7-performance', './js/sprites.js?v=7-performance',
+  './js/combat-audio.js?v=7-performance', './js/audio.js?v=7-performance', './js/expedition.js?v=7-performance', './js/crownfall.js?v=7-performance',
+  './js/gore.js?v=7-performance', './js/update.js?v=7-performance', './js/frame-budget.js?v=7-performance', './js/game.js?v=7-performance',
 ];
 self.addEventListener('install', e => {
   e.waitUntil((async () => {

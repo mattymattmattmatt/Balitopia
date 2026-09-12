@@ -8,10 +8,11 @@ const Gore = (() => {
     let seed = 1, atlas = null, cursor = 0, active = 0, emitted = 0;
     let popCursor = 0, pops = 0, head = 0, pending = 0, clock = 0, painted = 0, evicted = 0;
     let level = 'full', motion = true, limit = 240, tileLimit = 48, burstLimit = 96;
+    let breakupLimit = 240, burstCell = 0, merged = 0, paintLimit = 24;
     const bits = Array.from({ length: MAX_BITS }, () => ({ alive: false }));
     const bursts = Array.from({ length: MAX_BITS }, () => ({ alive: false }));
     const queue = Array.from({ length: QUEUE }, () => ({}));
-    const tiles = new Map(), bodies = new Map();
+    const tiles = new Map(), bodies = new Map(), burstCells = new Map();
     const random = () => { seed ^= seed << 13; seed ^= seed >>> 17; seed ^= seed << 5; return (seed >>> 0) / 4294967296; };
     function surface(w, h) { const c = makeCanvas(); c.width = w; c.height = h; return c; }
     function buildAtlas() {
@@ -151,7 +152,7 @@ const Gore = (() => {
       for (const s of queue) s.body = null;
       for (const t of tiles.values()) { t.canvas.width = 0; t.canvas.height = 0; }
       tiles.clear(); head = 0; pending = 0; active = 0; emitted = 0; cursor = 0; pops = 0; popCursor = 0;
-      painted = 0; evicted = 0; clock = 0;
+      painted = 0; evicted = 0; clock = 0; merged = 0; burstCells.clear();
     }
     function configure(options) {
       level = ['full', 'light', 'off'].includes(options.level) ? options.level : 'full';
@@ -159,11 +160,23 @@ const Gore = (() => {
       limit = Math.max(0, Math.min(MAX_BITS, options.bits ?? 240));
       tileLimit = Math.max(4, Math.min(64, options.tiles ?? 48));
       burstLimit = Math.max(0, Math.min(limit, options.burst ?? 96));
+      breakupLimit = Math.max(0, Math.min(limit, options.breakups ?? limit));
+      paintLimit = Math.max(1, Math.min(24, options.paint ?? 24));
+      const cell = Math.max(0, options.burstCell || 0);
+      if (cell !== burstCell) {
+        burstCells.clear();
+        for (const b of bursts) b.cell = null;
+        burstCell = cell;
+      }
       if (level === 'off') { clear(); return; }
       buildAtlas();
       while (tiles.size > tileLimit) retireTile(oldestKey(), true);
       for (const p of bits) if (p.alive && (active > limit || !motion)) { p.alive = false; active--; }
-      for (const b of bursts) if (b.alive && (pops > limit || !motion)) { b.alive = false; pops--; }
+      for (const b of bursts) if (b.alive && (pops > breakupLimit || !motion)) retireBurst(b);
+    }
+    function retireBurst(b) {
+      if (burstCells.get(b.cell) === b) burstCells.delete(b.cell);
+      b.alive = false; b.body = null; b.cell = null; pops--;
     }
     function reset(runSeed) { clear(); if (level !== 'off') buildAtlas(); seed = (runSeed | 0) || 1; }
     function burst(x, y, height, size, hit = {}) {
@@ -180,24 +193,35 @@ const Gore = (() => {
       }
       if (!motion || hit.visible === false || !limit) return;
       const body = bodies.get(hit.body) || null;
-      // Independent of the flying-particle budget. One cached blit shows the
-      // body bursting into six pieces even if hundreds die in the same update.
-      let slot = -1;
-      if (pops < limit) for (let i = 0; i < MAX_BITS; i++) {
+      // Separate from the flying-particle budget. Dense groups can share spray;
+      // the latest death stays visible when the pool is full.
+      const cell = burstCell ? Math.floor(x / burstCell) + ':' + Math.floor(y / burstCell) : null;
+      const nearby = cell === null ? null : burstCells.get(cell);
+      let slot = nearby ? nearby.slot : -1;
+      if (nearby) merged++;
+      if (slot < 0 && pops < breakupLimit) for (let i = 0; i < MAX_BITS; i++) {
         const index = (popCursor + i) % MAX_BITS;
         if (!bursts[index].alive) { slot = index; break; }
       }
-      if (slot < 0) { // Replace the oldest animation, never suppress a new kill.
+      if (slot < 0 && breakupLimit) { // Replace the oldest animation; keep new kills visible.
         let age = -1;
         for (let i = 0; i < MAX_BITS; i++) {
           const index = (popCursor + i) % MAX_BITS;
           if (bursts[index].alive && bursts[index].t > age) { slot = index; age = bursts[index].t; }
         }
       }
-      const b = bursts[slot]; popCursor = (slot + 1) % MAX_BITS;
-      if (!b.alive) pops++;
-      b.alive = true; b.x = x; b.y = y - height; b.t = 0; b.body = body;
-      b.size = (blast ? 150 : 110) * scale; b.dur = level === 'light' ? 0.38 : 0.52;
+      if (slot >= 0) {
+        const b = bursts[slot], previousSize = nearby ? b.size : 0;
+        popCursor = (slot + 1) % MAX_BITS;
+        if (b.alive) retireBurst(b);
+        pops++; b.alive = true; b.x = x; b.y = y - height; b.t = 0; b.body = body;
+        b.slot = slot; b.cell = cell;
+        if (cell !== null) burstCells.set(cell, b);
+        // Nearby simultaneous deaths share the spray; chunks and every ground
+        // stain remain independently emitted. Avoid hundreds of overlapping quads.
+        b.size = Math.max(previousSize, (blast ? 150 : 110) * scale);
+        b.dur = level === 'light' ? 0.38 : 0.52;
+      }
       const desired = level === 'light' ? (boss ? 18 : blast ? 9 : 6) : (boss ? 54 : blast ? 30 : 18);
       const n = Math.max(0, Math.min(desired, limit - active, burstLimit - emitted));
       for (let i = 0; i < n; i++) {
@@ -221,7 +245,7 @@ const Gore = (() => {
       if (level === 'off') return;
       dt = Math.max(0, Math.min(dt, 0.1));
       const drag = Math.exp(-1.8 * dt);
-      for (const b of bursts) if (b.alive) { b.t += dt; if (b.t >= b.dur) { b.alive = false; pops--; } }
+      for (const b of bursts) if (b.alive) { b.t += dt; if (b.t >= b.dur) retireBurst(b); }
       for (const p of bits) {
         if (!p.alive) continue;
         p.t += dt; p.x += p.vx * dt; p.y += p.vy * dt;
@@ -243,7 +267,7 @@ const Gore = (() => {
           }
         }
       }
-      let budget = level === 'light' ? 12 : 24;
+      let budget = Math.min(paintLimit, level === 'light' ? 12 : 24);
       while (pending && budget-- > 0) { const s = queue[head]; paint(s); s.body = null; head = (head + 1) % QUEUE; pending--; }
     }
     function drawGround(c, x, y, w, h) {
@@ -285,6 +309,7 @@ const Gore = (() => {
     }
     function stats() {
       return { active, bursts: pops, pending, tiles: tiles.size, painted, evicted, limit, tileLimit, bodies: bodies.size,
+        breakupLimit, burstCell, merged, burstCells: burstCells.size, paintLimit,
         textureBytes: tiles.size * RES * RES * 4 + (atlas ? 512 * 256 * 4 : 0) + bodies.size * (192 * 144 + 512 * 64) * 4 };
     }
     return { configure, reset, prepareBody, burst, update, drawGround, drawAir, stats,

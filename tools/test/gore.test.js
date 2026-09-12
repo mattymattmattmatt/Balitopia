@@ -101,7 +101,7 @@ test('repeated mass explosions keep all damage while cosmetics stay bounded on e
       assert.equal(B.G.kills, 120 * (round + 1), 'every enemy dies even with a full effects pool');
       assert(B.effects().length <= cap.effects);
       assert(B.gore.stats().active <= cap.gibs);
-      assert(B.gore.stats().bursts <= cap.gibs);
+      assert(B.gore.stats().bursts <= cap.breakups);
       assert(B.gore.stats().pending <= 256);
       assert.equal(B.G.hitStop, 0, 'mass kills do not freeze combat');
       B.player().iv = 5; B.update(1/60); B.render(1/60);
@@ -191,6 +191,30 @@ test('body sprite caches are bounded and reset/Off/reduced motion clear all deat
     if (mode==='motion') gore.configure({level:'full',motion:false});
     assert.equal(gore.stats().active+gore.stats().bursts,0);
   }
+});
+
+test('dense deaths share airborne spray while retaining chunks, stains and fresh kills', () => {
+  const {gore}=host(); gore.configure({level:'full',bits:120,burst:48,breakups:12,burstCell:64});
+  for(let i=0;i<300;i++) gore.burst(100+i%16,100+i%12,25,18,{blast:true});
+  assert.equal(gore.stats().bursts,1); assert.equal(gore.stats().merged,299);
+  assert(gore.stats().active>0); assert(gore.stats().pending>0);
+  for(let i=0;i<30;i++) gore.burst(200+i*80,500,25,18,{blast:true});
+  assert.equal(gore.stats().bursts,12); assert.equal(gore.stats().burstCells,12);
+  const calls=[]; gore.drawAir({drawImage:(...args)=>calls.push(args),fillRect(){}},x=>x===2520);
+  assert.equal(calls.length,1,'latest distant kill replaces an old animation even at the cap');
+  for(let i=0;i<40;i++) gore.update(.1);
+  assert.equal(gore.stats().bursts+gore.stats().burstCells,0); assert(gore.stats().tiles>0);
+  gore.burst(100,100,25,18); assert.equal(gore.stats().bursts,1);
+  gore.configure({level:'off'}); assert.equal(gore.stats().burstCells,0);
+});
+
+test('busy deaths respect the selected ground-paint budget and eventually drain', () => {
+  const {gore}=host(); gore.configure({level:'full',bits:0,paint:6});
+  for(let i=0;i<300;i++) gore.burst(100+i*12,900,25,18,{blast:true});
+  gore.update(1/60); assert.equal(gore.stats().painted,6);
+  assert(gore.stats().pending>0);
+  for(let i=0;i<60;i++) gore.update(1/60);
+  assert.equal(gore.stats().pending,0); assert(gore.stats().tiles>0);
 });
 
 test('legacy damage-number preferences cannot reintroduce combat text', () => {

@@ -1,5 +1,7 @@
 # Crownfall — build 6
 
+Build 7 retains these systems and fixes crowded-combat performance. See [PERFORMANCE.md](PERFORMANCE.md) for current budgets and validation.
+
 The main run is now a raid through three Crown Engines. The player gathers a
 squad, overfeeds each engine with stolen souls, defeats its keeper and chooses
 a stolen power. Destroying all three brings out King Glob. The old six-minute

@@ -35,12 +35,12 @@ const DASH_IFRAME = 0.32;
 // props and sparks, and hard limits for cosmetic effects and gore. Damage,
 // blast radius and XP never depend on whether a visual effect is admitted.
 const QUALITY = {
-  high:     { parts: 0.35, statusFx: 14, dpr: 1.15, light: 0, decor: 0.55, trails: 0, maxEnemies: 300, effects: 80, particleBurst: 56, gibs: 320, goreBurst: 128, stainTiles: 64 },
-  balanced: { parts: 0.20, statusFx: 8,  dpr: 1.0,  light: 0, decor: 0.35, trails: 0, maxEnemies: 300, effects: 56, particleBurst: 32, gibs: 240, goreBurst: 96,  stainTiles: 48 },
-  battery:  { parts: 0.12, statusFx: 5,  dpr: 0.9,  light: 0, decor: 0.20, trails: 0, maxEnemies: 230, effects: 36, particleBurst: 20, gibs: 160, goreBurst: 64,  stainTiles: 32 },
-  perf:     { parts: 0.08, statusFx: 3,  dpr: 0.8,  light: 0, decor: 0.12, trails: 0, maxEnemies: 150, effects: 24, particleBurst: 12, gibs: 120, goreBurst: 48,  stainTiles: 24 },
+  high:     { parts: 0.35, statusFx: 14, dpr: 1.15, light: 0, decor: 0.55, trails: 0, maxEnemies: 300, effects: 80, particleBurst: 56, gorePaint: 24, breakups: 128, gibs: 320, goreBurst: 128, stainTiles: 64 },
+  balanced: { parts: 0.20, statusFx: 8,  dpr: 1.0,  light: 0, decor: 0.35, trails: 0, maxEnemies: 300, effects: 56, particleBurst: 32, gorePaint: 16, breakups: 96, gibs: 240, goreBurst: 96,  stainTiles: 48 },
+  battery:  { parts: 0.12, statusFx: 5,  dpr: 0.85,  light: 0, decor: 0.20, trails: 0, maxEnemies: 230, effects: 36, particleBurst: 20, gorePaint: 10, breakups: 64, gibs: 160, goreBurst: 64,  stainTiles: 32 },
+  perf:     { parts: 0.08, statusFx: 3,  dpr: 0.7,  light: 0, decor: 0.12, trails: 0, maxEnemies: 150, effects: 24, particleBurst: 12, gorePaint: 6, breakups: 40, gibs: 120, goreBurst: 48,  stainTiles: 24 },
 };
-let QL = QUALITY.balanced;
+let QL = QUALITY.balanced, qualityName = 'balanced';
 
 // ---------------- Canvas ----------------
 const canvas = document.getElementById('game');
@@ -275,7 +275,7 @@ const parts = [];    for (let i = 0; i < MAX_PARTS; i++) parts.push({ alive: fal
 let hearts = [], patches = [], effects = [], telegraphs = [];
 let partCursor = 0;
 function configureGore() {
-  gore.configure({ level: prefs.gore, motion: !!prefs.motion, bits: QL.gibs, tiles: QL.stainTiles, burst: QL.goreBurst });
+  gore.configure({ level: prefs.gore, motion: !!prefs.motion, bits: QL.gibs, tiles: QL.stainTiles, burst: QL.goreBurst, breakups: QL.breakups, burstCell: 64, paint: QL.gorePaint });
   Sound.setGore(prefs.gore);
 }
 function prepareGoreBodies() {
@@ -1479,7 +1479,7 @@ function updateEnemies(dt) {
     const phase = (i + G.frameN) % 3;
     const ecx = (e.x / CELL) | 0, ecy = (e.y / CELL) | 0;
     for (let cx = -1; cx <= 1; cx++) {
-      if (((cx + 1) % 3) !== phase && G.sepBudget <= 0) continue;
+      if (cx + 1 !== phase) continue;
       for (let cy = -1; cy <= 1; cy++) {
         const a = hash.get((ecx + cx) * 4096 + (ecy + cy));
         if (!a || a.gen !== hashGen) continue;
@@ -2251,7 +2251,12 @@ function gainXP(v) {
 }
 
 // ---------------- Main update ----------------
-let last = 0, rafId = 0, fpsAcc = 0, fpsN = 0, benchFrames = 0, adaptAcc = 0, adaptN = 0, goodStreak = 0;
+let last = null, lastDraw = null, rafId = 0;
+const frameBudget = FrameBudget.create();
+const targetFps = () => Math.max(30, Math.min(60, Number(prefs.fpsCap) || 60));
+function resetFrameClock() {
+  last = lastDraw = null; G.capAcc = 0; frameBudget.reset();
+}
 const MENU_IDS = ['screen-title', 'screen-story', 'screen-select', 'screen-records', 'screen-shop', 'screen-crown',
   'screen-settings', 'screen-howto', 'screen-over', 'screen-roster', 'screen-levelup', 'screen-chest', 'screen-mutator'];
 function anyOverlayOpen() {
@@ -2260,48 +2265,30 @@ function anyOverlayOpen() {
 }
 function frame(ts) {
   rafId = requestAnimationFrame(frame);
-  let dt = Math.min(0.05, (ts - last) / 1000 || 0.016);
+  const elapsed = last === null ? 1/60 : Math.max(0, (ts - last) / 1000);
   last = ts;
-  // Frame cap (battery): skip work between capped frames rather than rendering
-  // at 60 behind a menu the player is reading.
-  if (prefs.fpsCap && prefs.fpsCap < 60) {
-    G.capAcc = (G.capAcc || 0) + dt;
-    if (G.capAcc < 1 / prefs.fpsCap) return;
-    dt = G.capAcc; G.capAcc = 0;
-  }
-  // one-time boot benchmark → auto quality
-  if (benchFrames < 300 && G.running) {
-    benchFrames++; fpsAcc += dt; fpsN++;
-    if (benchFrames === 300) autoQuality(fpsN / fpsAcc);
-  } else if (G.running && (!prefs.quality || prefs.quality === 'auto')) {
-    // Adaptive safety net: if the frame rate stays poor for ~3s (a real device
-    // under a real peak horde, not a synthetic benchmark), step the preset down.
-    adaptAcc += dt; adaptN++;
-    if (adaptAcc >= 3) {
-      const fps = adaptN / adaptAcc;
-      adaptAcc = 0; adaptN = 0;
-      if (fps < 44 && QL !== QUALITY.perf) {
-        // The ladder used to stop at `battery`, so a phone that still couldn't
-        // hold 44 fps there had nowhere left to go and simply stayed slow.
-        applyQuality(QL === QUALITY.high ? 'balanced' : QL === QUALITY.balanced ? 'battery' : 'perf');
-        goodStreak = 0;
-        banner('⚙ QUALITY LOWERED FOR SMOOTHNESS — change it in Settings');
-      } else if (fps > 57 && QL !== QUALITY.balanced) {
-        // Step back up, but only after a sustained comfortable stretch — the
-        // device heuristic starts phones low, and a strong phone shouldn't be
-        // stuck there. Never oscillates: one downgrade resets the streak.
-        if (++goodStreak >= 5) {
-          goodStreak = 0;
-          applyQuality(QL === QUALITY.perf ? 'battery' : 'balanced');
-        }
-      } else goodStreak = 0;
-    }
-  }
+  // Honour the cap on 90/120/144 Hz screens too. Clamp only simulation time;
+  // quality control and hit-stop must see the actual wall-clock frame time.
+  const target = targetFps(), interval = 1 / target;
+  G.capAcc = (G.capAcc || 0) + elapsed;
+  if (G.capAcc + 0.00001 < interval) return;
+  G.capAcc = Math.max(0, (G.capAcc + 0.00001) % interval - 0.00001);
+  const firstDraw = lastDraw === null;
+  const wallDt = firstDraw ? elapsed : Math.max(0, (ts - lastDraw) / 1000);
+  lastDraw = ts;
+  const dt = Math.min(0.05, wallDt);
+  if (G.running && !G.over && !document.hidden && window.innerWidth > window.innerHeight) {
+    const next = firstDraw ? null : frameBudget.observe(wallDt, target, qualityName);
+    if (next && (!prefs.quality || prefs.quality === 'auto')) applyQuality(next);
+  } else frameBudget.reset();
   // Crash recovery: an exception inside the loop used to kill the rAF chain
   // permanently — the game froze with no message and the run was lost.
   try {
     // hit-stop: freeze the sim for a few frames on impactful hits so they land with weight
-    if (G.hitStop > 0 && G.running && !G.over) { G.hitStop -= dt; render(0); return; }
+    if (G.hitStop > 0 && G.running && !G.over) {
+      G.hitStop = Math.max(0, G.hitStop - wallDt);
+      if (G.hitStop > 0) { render(0); return; }
+    }
     if (player) Sound.listener(player.x,player.y,viewW);
     if (G.running && !G.over && window.innerWidth > window.innerHeight) update(dt * G.timeScale);
     if (G.over && $('screen-over').classList.contains('hidden')) gore.update(dt);
@@ -2328,16 +2315,7 @@ function frame(ts) {
 }
 function hitStop(dur) { if (prefs.motion) G.hitStop = Math.max(G.hitStop || 0, dur); }
 
-function autoQuality(fps) {
-  if (prefs.quality && prefs.quality !== 'auto') return;
-  const q = fps < 28 ? 'perf' : fps < 40 ? 'battery' : 'balanced';
-  const cur = QL === QUALITY.high ? 'high' : QL === QUALITY.balanced ? 'balanced'
-            : QL === QUALITY.battery ? 'battery' : 'perf';
-  if (q !== cur) { applyQuality(q); if (q !== 'high') banner(`⚙ ${q.toUpperCase()} QUALITY — adjust in Settings`); }
-}
-// Touch devices begin on `balanced` rather than benchmarking down from `high`:
-// the first 300 frames of a run are exactly when a bad frame rate does the most
-// damage, and a phone almost never sustains the high preset anyway.
+// Start conservatively; the wall-clock monitor responds from the first second.
 function initialQuality() {
   if (prefs.quality && prefs.quality !== 'auto') return prefs.quality;
   const touch = matchMedia('(pointer: coarse)').matches || navigator.maxTouchPoints > 1;
@@ -2347,7 +2325,9 @@ function initialQuality() {
   return (cores <= 4 || mem <= 3) ? 'battery' : 'balanced';
 }
 function applyQuality(name) {
-  QL = QUALITY[name] || QUALITY.balanced;
+  qualityName = QUALITY[name] ? name : 'balanced';
+  QL = QUALITY[qualityName];
+  document.body.dataset.quality = qualityName;
   if (effects.length > QL.effects) effects.length = QL.effects;
   configureGore();
   resize();
@@ -2692,7 +2672,7 @@ function render(dt) {
   // the difference between 46 and 60 fps.
   const heavy = vis.length > 130;
   // pass 1: shadows (one bucketed sprite, no state changes)
-  for (const e of vis) if (!heavy || e.r > 15 || e.elite) shadow(e.x, e.y + 2, e.dh * e.scale * 0.62);
+  for (const e of vis) if (e.elite || (QL.decor > 0.2 && (!heavy || e.r > 15))) shadow(e.x, e.y + 2, e.dh * e.scale * 0.62);
   // pass 2: bodies + per-enemy decoration
   const fxBudget = QL.statusFx;
   let fxUsed = 0;
@@ -2821,8 +2801,6 @@ function render(dt) {
         ctx.globalAlpha = 0.75;
         const bs = 26 + Math.sin(G.time * 12 + b) * 4;
         ctx.drawImage(Sprites.blast(col), ex - bs, ey - bs, bs * 2, bs * 2);
-        emitLight(ex, ey, 90, col, 0.45);
-        emitLight((player.x + ex) / 2, (player.y + ey) / 2, r.L * 0.5, col, 0.16);
       }
       ctx.globalAlpha = 1;
     }
@@ -4059,6 +4037,7 @@ function resolveDaily(save, ctx) {
 
 // ---------------- Game flow ----------------
 function newGame(heroIdx, diffIdx, daily) {
+  resetFrameClock();
   Sound.resetCombat(); Sound.prepareRun(HEROES[heroIdx].id);
   const save = loadSave();
   G.session = Expedition.create(selectedMode, selectedRoute, selectedBlessing, daily);
@@ -5338,7 +5317,7 @@ function wire() {
       if (rafId) { cancelAnimationFrame(rafId); rafId = 0; }
     } else {
       Sound.resumeAll();
-      last = performance.now();
+      resetFrameClock();
       if (!rafId) rafId = requestAnimationFrame(frame);
       requestWakeLock();
     }
@@ -5655,9 +5634,11 @@ AppUpdates.start({ canReload: () => !player || !$('screen-title').classList.cont
 
 // debug/testing handle
 window.__balitopia = {
-  G, enemies, gore, render, explodeAt, damageEnemy, buildHash,
+  G, enemies, gore, render, explodeAt, damageEnemy, buildHash, frame, resetFrameClock,
+  frameInfo: () => ({ fps: +frameBudget.fps().toFixed(1), target: targetFps(), quality: qualityName,
+    width: canvas.width, height: canvas.height }),
   effects: () => effects,
-  update, updateRelics, updateExpedition, applyUpgrade, checkRelicEvolutions, killBoss, endGame, maxHP,
+  update, updateEnemies, updateRelics, updateExpedition, applyUpgrade, checkRelicEvolutions, killBoss, endGame, maxHP,
   setRunSetup: (mode, route, blessing) => { selectedMode = Expedition.mode(mode).id; selectedRoute = Expedition.route(route).id; selectedBlessing = Expedition.blessing(blessing).id; },
   player: () => player,
   allies: () => allies,
@@ -5679,7 +5660,7 @@ window.__balitopia = {
   applyQuality, coach, showModal, allyFalloff,
   updateCrown, showCrownChoice,
   getQL: () => QL, viewInfo: () => ({ w: Math.round(viewW), h: Math.round(viewH), mul: +viewMul.toFixed(3) }),
-  setQL: q => { QL = q; resize(); },
+  setQL: q => { QL = q; qualityName = Object.keys(QUALITY).find(k => QUALITY[k] === q) || 'balanced'; resize(); },
   prof: v => { PROF.on = v; PROF.acc = {}; PROF.n = 0; }, profData: profReport, heroState: () => heroState,
 };
 

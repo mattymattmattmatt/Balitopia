@@ -115,6 +115,10 @@ button:disabled { cursor:default; opacity:.45; }
 #dash-btn i, #ps-btn i { border-radius:50%; overflow:hidden; }
 #dash-btn small, #ps-btn small { position:absolute; left:50%; transform:translateX(-50%); bottom:-20px; font-size:12px; font-weight:800; letter-spacing:.04em; color:#fff; text-shadow:0 1px 4px #000; }
 .facecard { border-radius:10px; box-shadow:0 3px 12px #0005; }
+/* Ready borders still signal charge; low-cost modes avoid repainting animated
+   shadows above a constantly changing Canvas playfield. */
+body[data-quality="battery"] :is(.facecard.ready, .fc-zap, #ps-btn.ready),
+body[data-quality="perf"] :is(.facecard.ready, .fc-zap, #ps-btn.ready) { animation:none; box-shadow:none; }
 #combat-notices { width:min(900px,90vw); margin:0 auto 12px; color:#a9c0c5; font-size:12px; }
 #combat-notices summary { cursor:pointer; padding:10px 0; color:#d5e6e8; }
 #combat-log { white-space:pre-line; line-height:1.8; margin:0; }
