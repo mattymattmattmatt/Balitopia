@@ -259,7 +259,7 @@ function addDamage(src, amt) {
       }
     }
   }
-  if (hs.charge < 1) {
+  if (hs.charge < 1 && !(G.crown && G.crown.powerLock > 0)) {
     const gain = amt * (G.mods.chargeMul || 1) / (POWER_NEED * (1 + hs.tier * 0.5));
     hs.charge = Math.min(1, hs.charge + gain);
     if (hs.charge >= 1 && src === player.heroIdx) { Sound.sfx.powerReady(); buzz(20); }  // your powershot is ready
@@ -441,7 +441,7 @@ function spawnEnemy(type, tier, x, y, elite) {
   e.hp = e.maxhp;
   e.spd = def.spd * (1.12 - scale * 0.18) * (0.9 + Math.random() * 0.25) * (G.mut.eSpd || 1);
   e.dmg = def.dmg * (1 + tier * 0.3) * scale * diff.edmg * roundDmgMul();
-  e.lastSrc = undefined;
+  e.lastSrc = undefined; e.crownEngine = -1; e.miniboss = 0; e.life = 0;
   e.xp = Math.max(1, Math.round(def.xp * (1 + tier * 0.9) * scale * (elite ? ELITE_XP : 1)));
   e.r = Math.max(def.r * scale, def.dh * scale * 0.21);   // hitbox now covers the body
   e.dh = def.dh;
@@ -684,6 +684,7 @@ function killEnemy(e, src, hit = {}) {
   }
   // Splitting can reuse this pooled enemy immediately. Finish all reads and
   // death rewards before allowing the slot to become a new living enemy.
+  crownKill(e,src,hit);
   if (e.elite) onEliteDeath(e);
 }
 // Nightmare removes heart drops entirely; the Famine mutator does too.
@@ -741,10 +742,11 @@ function damageEnemy(e, dmg, o) {
   dmg *= traitDmgMul(o.src, e);
   const crit = !o.noCrit && rollCrit(o.src);
   if (crit) { dmg *= G.mods.critMul; G.crits++; }
+  const dealt = Math.min(Math.max(0,e.hp),dmg);
   e.hp -= dmg;
   e.flash = crit ? 0.16 : 0.09;
   if (o.src != null) e.lastSrc = o.src;
-  addDamage(o.src, dmg);
+  addDamage(o.src, dealt);
   if (o.slow) e.slowT = Math.max(e.slowT, o.slow);
   if (o.poison) { e.poisonT = o.poisonT; e.poisonDps = Math.max(e.poisonDps, o.poison); e.poisonSrc = o.src; }
   if (o.burn) { e.burnT = Math.max(e.burnT || 0, o.burn); e.burnDps = Math.max(e.burnDps || 0, o.burnDps || dmg * 0.3); e.burnSrc = o.src; }
@@ -794,8 +796,9 @@ function traitDmgMul(src, e) {
 function damageBoss(dmg, o) {
   const b = G.boss;
   if (!b || !b.alive) return;
+  const dealt = Math.min(Math.max(0,b.hp),dmg);
   b.hp -= dmg; b.flash = 0.07;
-  addDamage(o.src, dmg);
+  addDamage(o.src, dealt);
   if (o.slow) b.slowT = Math.max(b.slowT, o.slow * 0.3);
   Sound.sfx.bossHit();
   if (b.hp <= 0) killBoss(b, o);
@@ -874,7 +877,7 @@ function breakCage(c) {
   if (G.session) {
     G.session.rescues++;
     G.soul = Math.min(SOUL_MAX, G.soul + 1);
-    heroState[c.heroIdx].charge = Math.max(heroState[c.heroIdx].charge, 0.65);
+    heroState[c.heroIdx].charge = Math.max(heroState[c.heroIdx].charge, G.crown ? 1 : 0.65);
     if (G.session.rescues % 3 === 0) {
       G.session.rally = 8;
       for (const hs of heroState) hs.charge = Math.min(1, hs.charge + 0.35);
@@ -1235,9 +1238,9 @@ function tickTimers(dt) {
   }
 }
 
-function explodeAt(x, y, r, dmg, src) {
+function explodeAt(x, y, r, dmg, src, extra = {}) {
   Sound.sfx.explosion(x,y,r);
-  const hit = { src, fromX: x, fromY: y, blast: true };
+  const hit = { ...extra, src, fromX: x, fromY: y, blast: true };
   eachEnemyNear(x, y, r + 30, e => {
     if ((e.x - x) ** 2 + (e.y - y) ** 2 < (r + e.r) ** 2) damageEnemy(e, dmg, hit);
   });
@@ -1379,7 +1382,7 @@ function updateEnemies(dt) {
     // despawn if far away (keeps the horde around the player)
     const ddx = px - e.x, ddy = py - e.y;
     const dist = Math.hypot(ddx, ddy);
-    if (dist > 1900) { e.alive = false; continue; }
+    if (dist > 1900 && !(e.crownEngine >= 0)) { e.alive = false; continue; }
 
     let sp = e.spd * (e.slowT > 0 ? 0.45 : 1);
     e.slowT -= dt;
@@ -1521,7 +1524,8 @@ function spawnBoss() {
   // Alternate bosses on endless rounds. One boss for the entire game meant the
   // reward for 6-8 minutes of play was identical every time.
   const isReef = round % 2 === 0 && round > 1;
-  const hp = BOSS.hp * diff.bhp * roundBossMul() * (G.mut.bHp || 1) * (isReef ? 1.15 : 1);
+  const baseHP = G.crown ? Math.min(26000,11000 + G.level*400 + allies.length*650) : BOSS.hp;
+  const hp = baseHP * diff.bhp * roundBossMul() * (G.mut.bHp || 1) * (isReef ? 1.15 : 1);
   const mod = round >= 3 ? BOSS_MODS[(Math.random() * BOSS_MODS.length) | 0] : null;
   G.boss = {
     alive: true, isBoss: true, kind: isReef ? 'reef' : 'glob', mod,
@@ -1969,7 +1973,9 @@ function tryDash() {
   const [mx, my] = moveVector();
   const a = (mx || my) ? Math.atan2(my, mx) : (player.fx >= 0 ? 0 : Math.PI);
   const tr = HERO_TRAIT[HEROES[player.heroIdx].id];
-  G.dashCd = DASH_CD * (tr.k === 'dashCd' ? 1 - tr.v : 1);
+  G.dashCd = DASH_CD * (tr.k === 'dashCd' ? 1 - tr.v : 1) * (G.crown?.boons.includes('dashbomb') ? .6 : 1);
+  if(G.crown?.boons.includes('dashbomb'))Crownfall.queueBlast(G.crown,{x:player.x,y:player.y,r:180,
+    damage:(48+G.level*8)*G.mods.dmg,src:player.heroIdx,delay:.3,kind:'dash'});
   G.dashes++;
   const nx = clampW(player.x + Math.cos(a) * DASH_DIST), ny = clampW(player.y + Math.sin(a) * DASH_DIST);
   // afterimages along the path
@@ -2006,6 +2012,10 @@ function tickSoul(dt) {
 // ACT STRUCTURE — a landmark roughly every 45 seconds.
 // ================================================================
 function runActBeats() {
+  if(G.crown) {
+    if(!G.beats.opening && G.time>=1){G.beats.opening=1;fireBeat('openRing');}
+    return;
+  }
   for (const b of ACT_BEATS) {
     if (G.beats[b.t] || encounterTime() < b.t) continue;
     G.beats[b.t] = 1;
@@ -2115,7 +2125,7 @@ function tickCombo(dt) {
 
 // ---------------- Pickups / patches / effects ----------------
 function updatePickups(dt) {
-  const magR = G.session && G.session.rally > 0 ? 650 : 92 * G.mods.magnet;
+  const magR = G.crown && G.crown.vacuum > 0 ? 800 : G.session && G.session.rally > 0 ? 650 : 92 * G.mods.magnet;
   for (const g of gems) {
     if (!g.alive) continue;
     g.t += dt;
@@ -2242,7 +2252,7 @@ function gainXP(v) {
 
 // ---------------- Main update ----------------
 let last = 0, rafId = 0, fpsAcc = 0, fpsN = 0, benchFrames = 0, adaptAcc = 0, adaptN = 0, goodStreak = 0;
-const MENU_IDS = ['screen-title', 'screen-story', 'screen-select', 'screen-records', 'screen-shop',
+const MENU_IDS = ['screen-title', 'screen-story', 'screen-select', 'screen-records', 'screen-shop', 'screen-crown',
   'screen-settings', 'screen-howto', 'screen-over', 'screen-roster', 'screen-levelup', 'screen-chest', 'screen-mutator'];
 function anyOverlayOpen() {
   for (const id of MENU_IDS) { const el = $(id); if (el && !el.classList.contains('hidden')) return true; }
@@ -2403,17 +2413,18 @@ function update(dt) {
   updateEbullets(dt);
   updateChests(dt);
   updatePickups(dt);
+  updateCrown(dt);
   G.flash = Math.max(0, G.flash - dt * 1.3);
   G.hurtFlash = Math.max(0, G.hurtFlash - dt * 1.6);
   if (G.surgeWarn) { G.surgeWarn.t -= dt; if (G.surgeWarn.t <= 0) G.surgeWarn = null; }
 
   // boss timing
-  if (!G.bossWarned && G.time >= G.nextBossAt - 15) {
+  if (!G.crown && !G.bossWarned && G.time >= G.nextBossAt - 15) {
     G.bossWarned = true;
     banner('⚠ THE GROUND IS SHAKING... ⚠');
     Sound.duckFor(1.2);
   }
-  if (!G.boss && G.time >= G.nextBossAt) spawnBoss();
+  if (!G.boss && (G.crown ? G.crown.bossReady : G.time >= G.nextBossAt)) spawnBoss();
 
   // camera: lead the direction of travel, and pull back when things get busy
   const lead = 92;
@@ -2556,6 +2567,7 @@ function render(dt) {
 
   // Stains cover scenery as well as terrain, below threats and living actors.
   gore.drawGround(ctx, camX, camY, vw, vh);
+  drawCrownEngines(onScreen);
 
   pEnd(); pStart('world');
   // ---- ground pools (undertow / mines / volatile) ----
@@ -3164,7 +3176,9 @@ function render(dt) {
     ctx.rotate(-a);
     ctx.font = 'bold 10px "Trebuchet MS",sans-serif';
     ctx.textAlign = 'center';
-    ctx.fillText(label !== undefined ? label : `${Math.round(d / 50) * 50 / 10}0m`, 0, 24);
+    if(label==='◆'){
+      ctx.beginPath();ctx.moveTo(0,16);ctx.lineTo(5,22);ctx.lineTo(0,28);ctx.lineTo(-5,22);ctx.closePath();ctx.fill();
+    } else ctx.fillText(label !== undefined ? label : `${Math.round(d / 50) * 50 / 10}0m`, 0, 24);
     ctx.restore();
     ctx.globalAlpha = 1;
   };
@@ -3176,7 +3190,9 @@ function render(dt) {
       if (d < nd) { nd = d; nearest = c; }
     }
     if (nearest && nd < 400 * 400) coach('cage');
-    if (nearest) edgeArrow(nearest.x, nearest.y, 330, '#ffd54f');
+    const engine=G.crown?.engines[G.crown.stage];
+    if (engine) edgeArrow(engine.x,engine.y,220,Crownfall.chapters[engine.index].color,.43,'◆');
+    if (nearest && (!engine || nd < 450*450)) edgeArrow(nearest.x, nearest.y, 330, '#ffd54f',.32,'⛓');
     if (G.boss && G.boss.alive) edgeArrow(G.boss.x, G.boss.y, 380, '#ff5252', 0.4, '👑');
   }
 
@@ -3257,7 +3273,7 @@ const RADAR_R = 2400;
 function drawMinimap() {
   const size = Math.round(Math.min(cw, ch) * 0.19);
   const pad = 12 + (parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--sal')) || 0);
-  const cx = pad + size / 2, cy = pad + size / 2 + 74;
+  const cx = pad + size / 2, cy = pad + size / 2 + (G.crown ? 100 : 74);
   const R = size / 2, s = R / RADAR_R;
   ctx.save();
   ctx.globalAlpha = 0.8;
@@ -3286,6 +3302,7 @@ function drawMinimap() {
   };
   for (const c of cages) if (!c.broken) blip(c.x, c.y, c.siege ? '#ff8a80' : '#ffd54f', 2.6, true);
   for (const c of chests) blip(c.x, c.y, '#fff59d', 3, true);
+  if(G.crown)for(const e of G.crown.engines)if(e.state!=='broken')blip(e.x,e.y,Crownfall.chapters[e.index].color,e.state==='active'?4:2.5,true);
   for (const e of enemies) if (e.alive && e.elite) blip(e.x, e.y, e.affix.color, 3, true);
   ctx.fillStyle = 'rgba(129,212,250,.8)';
   for (const al of allies) { const dx = (al.x - player.x) * s, dy = (al.y - player.y) * s; if (Math.hypot(dx, dy) < R - 3) ctx.fillRect(cx + dx - 1, cy + dy - 1, 2, 2); }
@@ -3345,7 +3362,7 @@ function updateHud(dt) {
   if (G.boss && G.boss.alive)
     setHud('boss-hp-bar', 'w', Math.max(0, G.boss.hp / G.boss.maxhp * 100).toFixed(1) + '%');
   // King Glob countdown — lets players plan their cage route (and endless returns)
-  const etaOn = !G.boss && G.time > G.nextBossAt - 120 && G.time < G.nextBossAt;
+  const etaOn = !G.crown && !G.boss && G.time > G.nextBossAt - 120 && G.time < G.nextBossAt;
   if (hudCache.etaOn !== etaOn) { hudCache.etaOn = etaOn; $('boss-eta').classList.toggle('hidden', !etaOn); }
   if (etaOn) setHud('boss-eta', 't', `👑 ${fmtTime(G.nextBossAt - G.time)}`);
   // combo meter — continuous score feedback for playing aggressively
@@ -3366,7 +3383,7 @@ function updateHud(dt) {
   const hs = heroState[player.heroIdx];
   const pct = Math.round(Math.min(1, hs ? hs.charge : 0) * 100);
   setHud('ps-fill', 'w', pct + '%');
-  const psReady = hs && hs.charge >= 1;
+  const psReady = hs && hs.charge >= 1 && !(G.crown && G.crown.powerLock>0);
   if (hudCache.psReady !== psReady) { hudCache.psReady = psReady; $('ps-btn').classList.toggle('ready', !!psReady); }
   if (psReady) coach('power');
   if (G.relicDirty) { G.relicDirty = 0; renderRelicHud(); }
@@ -3566,9 +3583,11 @@ function tryPowershot() {
 
 function powershot() {
   if (!G.running || G.over || !player) return false;
+  if (G.crown && G.crown.powerLock > 0) return false;
   const idx = player.heroIdx, hs = heroState[idx];
   if (!hs || hs.charge < 1) return false;
   hs.charge = 0;
+  if(G.crown)G.crown.powerLock=.8;
   if (G.session) G.session.powershots++;
   G.psKills = 0;
   const hero = HEROES[idx];
@@ -3578,6 +3597,9 @@ function powershot() {
 
   // shockwave: heavy damage + huge knockback around the hero
   const R = 350 * G.mods.area;
+  if(G.crown?.boons.includes('aftershock'))Crownfall.queueBlast(G.crown,{x:player.x,y:player.y,r:R*.85,
+    damage:base*6*mul*.55,src:idx,delay:.35,kind:'echo'});
+  if(G.crown?.boons.includes('bulwark'))G.wardUp=1;
   let killed = 0;
   eachEnemyNear(player.x, player.y, R + 40, e => {
     if ((e.x - player.x) ** 2 + (bodyY(e) - player.y) ** 2 < (R + e.r) ** 2) {
@@ -3786,7 +3808,7 @@ function refreshBuildStrip() {
 // gems, and the round's mutator draft can land in the same second. They used
 // to stack on top of each other. Now they queue and play in order.
 // ================================================================
-const OVERLAY_IDS = ['screen-levelup', 'screen-chest', 'screen-mutator'];
+const OVERLAY_IDS = ['screen-levelup', 'screen-chest', 'screen-mutator', 'screen-crown'];
 let overlayQ = [];
 const overlayOpen = () => OVERLAY_IDS.some(id => !$(id).classList.contains('hidden'));
 function queueOverlay(fn) {
@@ -3936,7 +3958,7 @@ function buildRosterBuild() {
 function closeRoster() {
   $('screen-roster').classList.add('hidden');
   // don't resume the simulation while a level-up choice is still on screen
-  if (!G.over && $('screen-levelup').classList.contains('hidden')) G.running = true;
+  if (!G.over && !overlayOpen()) G.running = true;
 }
 
 // ---------------- Daily challenge ----------------
@@ -4048,7 +4070,7 @@ function newGame(heroIdx, diffIdx, daily) {
   hudTick = 0;
   for (const key of Object.keys(keys)) keys[key] = false;
   joyMove.active = false; joyMove.id = null; joyMove.dx = 0; joyMove.dy = 0;
-  ['screen-title', 'screen-story', 'screen-roster', 'screen-modal', 'screen-levelup', 'screen-chest', 'screen-mutator'].forEach(id => $(id).classList.add('hidden'));
+  ['screen-title', 'screen-story', 'screen-roster', 'screen-modal', 'screen-levelup', 'screen-chest', 'screen-mutator', 'screen-crown'].forEach(id => $(id).classList.add('hidden'));
   G.running = true; G.over = false; G.victory = false; G.pendingLv = 0;
   G.time = 0; G.kills = 0; G.level = 1; G.xp = 0; G.xpNext = 16;
   G.spawnAcc = 0; G.boss = null; G.bossWarned = false; G.shake = 0; G.hitStop = 0;
@@ -4072,6 +4094,7 @@ function newGame(heroIdx, diffIdx, daily) {
   G.seed = (daily ? dayKey().replace(/-/g, '').slice(2) : (pendingSeed || makeSeed()));
   pendingSeed = null;
   G.rng = mulberry32(seedToInt(G.seed));
+  G.crown = Crownfall.create(G.session.mode,seedToInt(G.seed),!!daily);
   configureGore(); prepareGoreBodies(); gore.reset(seedToInt(G.seed));
   G.daily = daily || null;
   G.diff = DIFFICULTIES[Math.max(0, Math.min(DIFFICULTIES.length - 1, diffIdx | 0))];
@@ -4115,6 +4138,7 @@ function newGame(heroIdx, diffIdx, daily) {
 
   player = makeFighter(heroIdx, WORLD / 2, WORLD / 2);
   player.hp = maxHP(); player.iv = 1.5;
+  if(G.crown)heroState[heroIdx].charge=1;
   G.cam.x = player.x; G.cam.y = player.y;
 
   // cages: golden spiral around spawn (daily uses a fixed rotation so the
@@ -4136,6 +4160,12 @@ function newGame(heroIdx, diffIdx, daily) {
     ci++;
   }
 
+  // A rescue on the approach to each objective makes exploration build a squad.
+  if(G.crown)for(let i=0;i<3;i++){
+    const e=G.crown.engines[i],c=cages[i],d=Math.hypot(e.x-2600,e.y-2600);
+    c.x=e.x-(e.x-2600)/d*(i?160:245);c.y=e.y-(e.y-2600)/d*(i?160:245);
+  }
+
   // decor
   // Decor: 150 props across 27 million square pixels read as an empty field.
   // Now ~900, CLUSTERED into groves and rock fields rather than uniform-random,
@@ -4153,6 +4183,7 @@ function newGame(heroIdx, diffIdx, daily) {
       const x = cxw + (rnd() - 0.5) * spread * 2, y = cyw + (rnd() - 0.5) * spread * 2;
       if (x < 40 || y < 40 || x > WORLD - 40 || y > WORLD - 40) continue;
       if (Math.hypot(x - WORLD / 2, y - WORLD / 2) < 190) continue;   // keep spawn clear
+      if(G.crown?.engines.some(e=>Math.hypot(x-e.x,y-e.y)<140))continue;
       decor.push({ k: kinds[(rnd() * kinds.length) | 0], x, y, s: 0.65 + rnd() * 0.75 });
     }
   }
@@ -4163,6 +4194,8 @@ function newGame(heroIdx, diffIdx, daily) {
   $('screen-select').classList.add('hidden');
   $('screen-over').classList.add('hidden');
   $('hud').classList.remove('hidden');
+  $('hud').classList.toggle('crownfall',!!G.crown);
+  $('fury-meter').classList.toggle('hidden',!G.crown);
   // Head Start perk: free the nearest N cages immediately
   for (let n = 0; n < (G.headStart || 0) && cages.length; n++) {
     const c = cages.filter(c => !c.broken).sort((a, b) =>
@@ -4255,6 +4288,7 @@ function saveRun(score) {
       round: G.round, bossKills: G.bossKills, date: Date.now(),
       seed: G.seed, assist: prefs.assist ? 1 : 0, combo: G.bestCombo,
       mode: G.daily ? 'daily' : G.session.mode, route: G.session.route,
+      raid: G.crown ? { engines:G.crown.cleared,boons:G.crown.boons.slice(),rampages:G.crown.rampages } : null,
       medals: G.session.completed.length, grade: Expedition.grade(G.session, G.victory),
     };
     const records = Array.isArray(save.records) ? save.records : [];
@@ -4285,6 +4319,7 @@ function saveRun(score) {
     G.shellsEarned = Math.floor(score / SHELLS_PER_SCORE) + G.session.bonus + (!G.daily && G.victory ? 60 : 0);
     save.shells = (save.shells || 0) + G.shellsEarned;
     Expedition.record(save, G.session, G.victory);
+    Crownfall.record(save,G.crown,G.victory);
     // lifetime stats
     const st = save.stats || (save.stats = { kills: 0, dmg: 0 });
     st.kills += G.kills;
@@ -4358,7 +4393,7 @@ function nextGoals(save) {
 function buildStatsScreen(rank) {
   const won = G.victory, diff = G.diff;
   $('over-title').textContent =
-    G.bossKills > 1 ? `GLOB SLAIN ×${G.bossKills}!` : won ? 'BALITOPIA IS FREE!' : 'THE TIDE TAKES YOU';
+    G.bossKills > 1 ? `GLOB SLAIN ×${G.bossKills}!` : won ? 'BALITOPIA IS FREE!' : G.crown ? 'THE RAID LIVES ON' : 'THE TIDE TAKES YOU';
   $('over-title').style.color = won ? '#ffd54f' : '#ef9a9a';
   $('over-diff').innerHTML =
     (G.daily ? `<span class="diff-badge" style="color:#ffd54f;border-color:#ffd54f">☀ DAILY</span>` : '') +
@@ -4599,7 +4634,7 @@ function buildRecordsScreen() {
         <span class="rec-rank">${medal[i] || ('#' + (i + 1))}</span>
         <span class="rec-score">${r.score.toLocaleString()}</span>
         <span class="rec-hero">${crowns}${r.heroName}${r.assist ? ' <i class="rec-assist">assist</i>' : ''}</span>
-        <span class="rec-diff" style="color:${d.color}"><span class="record-mode">${r.mode === 'daily' ? 'Daily' : r.mode ? Expedition.mode(r.mode).name : 'Classic'}</span>${d.name}</span>
+        <span class="rec-diff" style="color:${d.color}"><span class="record-mode">${r.mode === 'daily' ? 'Daily' : r.mode === 'expedition' && !r.raid ? 'Expedition' : r.mode ? Expedition.mode(r.mode).name : 'Classic'}</span>${d.name}</span>
         <span class="rec-meta">${fmtTime(r.time)} · ${r.kills}☠ · ${r.freed}/${HEROES.length}${r.seed ? ' · ' + r.seed : ''}</span>
       </div>`;
     });
@@ -4871,9 +4906,11 @@ function buildHowto() {
     <div class="ht-row"><span class="ht-ico">🎨</span><span><b>Colour = danger.</b> Six power tiers by hue: green → blue → purple → pink → orange → gold. Turn on <em>Colorblind danger pips</em> or a <em>Colour vision</em> mode in Settings for redundant cues.</span></div>
     <div class="ht-row"><span class="ht-ico">💀</span><span><b>Elites</b> carry an affix and a name tag — <em>Gilded</em> pays out, <em>Splitting</em> multiplies, <em>Volatile</em> leaves fire. Kill them for chests.</span></div>
     <div class="ht-row"><span class="ht-ico">📦</span><span><b>Caches</b> give several upgrades at once. Chase the <b>Golden One</b> if you see it run.</span></div>
-    <div class="ht-row"><span class="ht-ico">👑</span><span><b>King Glob</b> arrives at 6:00 in Expedition or 3:00 in Blitz. Defeat him to win. In <b>Endless</b>, bosses return, the <b>Reef Mother</b> alternates in, and each round offers a curse for bonus score.</span></div>
+    <div class="ht-row"><span class="ht-ico">👑</span><span><b>Crownfall & Blitz.</b> Fight inside each Crown Engine’s ring. Defeat its keeper and fill its soul quota, then choose a stolen power. Destroy all three to bring out King Glob. Defeat him to win. In <b>Endless</b>, bosses return, the <b>Reef Mother</b> alternates in, and each round offers a curse for bonus score.</span></div>
     <div class="ht-row"><span class="ht-ico">🏝</span><span><b>Choose your scenery.</b> Islands keep their art and music. No tide pushes, wind drift or closing arena interrupts combat.</span></div>
     <h3>BUILDING A RUN</h3>
+    <div class="ht-row"><span class="ht-ico">♨</span><span><b>Fury.</b> Nearby kills fill the meter. Keep fighting before it drains. At full Fury you enter an 8-second <b>Rampage</b>: a ready blast, rapid blast recharges and faster dash recovery. Crownfall and Blitz start with a powershot ready.</span></div>
+    <div class="ht-row"><span class="ht-ico">◆</span><span><b>Stolen powers.</b> Every engine offers three choices. Build around chain explosions, repeat blasts, explosive dashes, shielding, healing or longer Rampages. Your choices last this raid.</span></div>
     <div class="ht-row"><span class="ht-ico">★</span><span><b>Level up</b> to draft an upgrade. Cards are face-up — read them. <b>Reroll</b> or <b>Skip</b> for HP if you don't like the hand.</span></div>
     <div class="ht-row"><span class="ht-ico">🗿</span><span><b>Relics</b> are your second weapon slot (two max, four levels each). They're hero-agnostic, so the same relic plays differently on every Guardian — this is where build variety lives.</span></div>
     <div class="ht-row"><span class="ht-ico">🔗</span><span><b>Combo.</b> Kills within two seconds chain a multiplier onto your score. Aggression pays.</span></div>
@@ -4888,7 +4925,7 @@ function openHowto() { Sound.sfx.uiClick(); buildHowto(); $('screen-howto').clas
 function closeHowto() { Sound.sfx.uiBack(); $('screen-howto').classList.add('hidden'); }
 
 // ---------------- Save data (versioned) ----------------
-const SAVE_VERSION = 4;
+const SAVE_VERSION = 5;
 const SAVE_KEY = 'balitopia', SAVE_BAK = 'balitopia_bak';
 let saveCache = null, saveDirty = false, saveTimer = 0;
 
@@ -4935,6 +4972,7 @@ function loadSave() {
   }
   if (!Array.isArray(s.unlocked) || !s.unlocked.length) { s.unlocked = STARTER_HEROES.slice(); s.__fresh = 1; }
   Expedition.migrate(s);
+  Crownfall.migrate(s);
   saveCache = s;
   // persist the initialised/migrated shape immediately, so the unlock roster
   // exists on disk from the very first visit rather than only after a run
@@ -4988,7 +5026,7 @@ function showModal(title, body, buttons) {
     el.addEventListener('click', () => {
       $('screen-modal').classList.add('hidden');
       Sound.sfx.uiClick();
-      if (wasRunning && !G.over && $('screen-levelup').classList.contains('hidden')) G.running = true;
+      if (wasRunning && !G.over && !overlayOpen()) G.running = true;
       if (b.onClick) b.onClick();
     });
     row.appendChild(el);
@@ -5335,8 +5373,140 @@ function maybeOfferInstall() {
     [{ label: 'Got it', primary: true }]);
 }
 
+// ---------------- Crownfall: raid goals and an aggressive combat loop ----------------
+function crownKill(e,src,hit) {
+  if(!G.crown)return;
+  const result=Crownfall.killed(G.crown,{x:e.x,y:e.y,elite:e.elite,engine:e.crownEngine,
+    nearby:Math.hypot(e.x-player.x,e.y-player.y)<650,chain:!!hit.crownChain,
+    src:src??player.heroIdx,damage:(35+G.level*7)*G.mods.dmg});
+  if(result.rampage){
+    heroState[player.heroIdx].charge=1;
+    Sound.sfx.powerReady();buzz(HAPTIC.power);
+    banner('RAMPAGE · rapid blast recharge');
+  }
+  if(result.heal){
+    G.healPct(.06);
+    G.crown.vacuum=1.8;
+  }
+}
+function updateCrown(dt) {
+  const run=G.crown;if(!run||G.over)return;
+  Crownfall.tick(run,dt);
+  const hs=heroState[player.heroIdx],before=hs.charge;
+  hs.charge=Math.min(1,hs.charge+dt*(run.rampage>0?.34:.045)*(G.mods.chargeMul||1));
+  if(before<1&&hs.charge>=1){Sound.sfx.powerReady();buzz(HAPTIC.tick);}
+  if(run.rampage>0)G.dashCd=Math.max(0,G.dashCd-dt*.5);
+  const active=run.engines[run.stage];
+  if(active&&active.state==='active'&&!active.wardenSpawned&&!active.wardenDown&&
+    Math.hypot(player.x-active.x,player.y-active.y)<620){
+    const c=Crownfall.chapters[active.index];
+    const angle=Math.atan2(active.y-player.y,active.x-player.x);
+    const e=spawnEnemy(c.warden,Math.min(2,active.index),active.x+Math.cos(angle)*190,active.y+Math.sin(angle)*190);
+    if(e){
+      e.crownEngine=active.index;e.elite=true;e.affix={id:'keeper',name:'Crown Keeper',color:c.color};
+      e.scale*=1.35;e.r*=1.35;e.cyOff*=1.35;
+      e.hp=e.maxhp=(480+active.index*650)*G.diff.ehp;
+      e.spd=active.index===2?52:68;e.dmg=(14+active.index*5)*G.diff.edmg;e.xp=18+active.index*12;
+      active.wardenSpawned=true;Sound.sfx.eliteSpawn();
+      telegraphs.push({x:e.x,y:e.y,r:62,t:0,dur:.9,dmg:0,color:c.color,mark:1});
+      banner(c.title+' · '+c.story);
+    }
+  }
+  for(const b of Crownfall.takeBlasts(run)){
+    explodeAt(b.x,b.y,b.r,b.damage,b.src,{crownChain:true});run.burstCount++;
+    if(G.over)return;
+  }
+  const finished=Crownfall.finishEngine(run);
+  if(finished){
+    // Commit objective progress before its explosion can kill more enemies.
+    G.session.bonus+=35;G.healPct(.25);
+    for(const hs of heroState)hs.charge=1;
+    run.powerLock=.8;
+    explodeAt(finished.x,finished.y,520,(120+finished.index*100)*G.mods.dmg,player.heroIdx,{crownChain:true});
+    Sound.sfx.powershot(finished.x,finished.y,520);
+    for(const eb of ebullets)if(eb.alive&&Math.hypot(eb.x-finished.x,eb.y-finished.y)<650)eb.alive=false;
+    banner(Crownfall.chapters[finished.index].after);
+    const token=G.runToken;
+    queueOverlay(()=>{if(!G.over&&G.runToken===token&&G.crown===run)showCrownChoice();});
+  }
+}
+function showCrownChoice() {
+  const run=G.crown;if(!run?.pending||G.over)return;
+  G.running=false;
+  const token=G.runToken,stage=run.pending.engine,chapter=Crownfall.chapters[stage];
+  $('crown-reward-title').textContent=chapter.short+' DESTROYED';
+  $('crown-reward-story').textContent=chapter.after;
+  $('crown-reward-next').textContent=stage===2?'Choose your final power. King Glob is next.':'Choose a stolen power. It lasts this run.';
+  const row=$('crown-choices');row.innerHTML='';
+  for(const id of run.pending.options){
+    const boon=Crownfall.boons.find(b=>b.id===id),button=document.createElement('button');
+    button.className='crown-choice';button.setAttribute('aria-label',boon.name+': '+boon.desc);
+    button.innerHTML=`<span class="crown-choice-tag">${boon.tag}</span><i>${boon.icon}</i><b>${boon.name}</b><span>${boon.desc}</span><small>CLAIM POWER →</small>`;
+    button.addEventListener('click',()=>{
+      if(G.over||G.runToken!==token||G.crown!==run||run.pending?.engine!==stage||!Crownfall.choose(run,id))return;
+      if(id==='bulwark'){G.mods.armor*=.85;G.wardUp=1;}
+      Sound.sfx.unlock();buzz(HAPTIC.level);
+      $('screen-crown').classList.add('hidden');
+      if(!run.bossReady)banner(Crownfall.chapters[run.stage].title+' · '+Crownfall.chapters[run.stage].story);
+      overlayClosed();
+    });
+    row.appendChild(button);
+  }
+  $('screen-crown').classList.remove('hidden');
+}
+const crownArt=new Map();
+function crownEngineArt(index) {
+  if(crownArt.has(index))return crownArt.get(index);
+  const canvas=document.createElement('canvas');canvas.width=240;canvas.height=220;
+  const c=canvas.getContext('2d'),color=Crownfall.chapters[index].color;
+  c.fillStyle='#05101788';c.beginPath();c.ellipse(120,186,103,28,0,0,Math.PI*2);c.fill();
+  c.fillStyle='#253946';c.strokeStyle='#5a7380';c.lineWidth=3;
+  c.beginPath();c.moveTo(26,168);c.lineTo(120,133);c.lineTo(214,168);c.lineTo(120,205);c.closePath();c.fill();c.stroke();
+  for(const x of [42,178]){
+    c.fillStyle='#18272f';c.fillRect(x,65,20,112);c.fillStyle='#78909a';c.fillRect(x,65,5,112);
+    c.fillStyle=color;c.fillRect(x-6,59,32,9);c.fillRect(x-4,161,28,8);
+  }
+  c.strokeStyle='#b58c55';c.lineWidth=5;
+  for(const side of [-1,1]){c.beginPath();c.moveTo(120+side*66,77);c.lineTo(120+side*24,118);c.stroke();}
+  c.fillStyle=color+'22';c.beginPath();c.arc(120,108,53,0,Math.PI*2);c.fill();
+  c.fillStyle='#10212c';c.strokeStyle=color;c.lineWidth=4;
+  c.beginPath();for(let i=0;i<6;i++){const a=(i/6-.25)*Math.PI*2;c.lineTo(120+Math.cos(a)*38,108+Math.sin(a)*43);}c.closePath();c.fill();c.stroke();
+  c.fillStyle=color;c.beginPath();c.moveTo(98,103);c.lineTo(99,87);c.lineTo(109,96);c.lineTo(120,80);c.lineTo(131,96);c.lineTo(141,87);c.lineTo(142,103);c.closePath();c.fill();
+  c.fillStyle='#fff1d8';c.beginPath();c.moveTo(120,114);c.lineTo(130,126);c.lineTo(120,140);c.lineTo(110,126);c.closePath();c.fill();
+  crownArt.set(index,canvas);return canvas;
+}
+function drawCrownEngines(onScreen) {
+  if(!G.crown)return;
+  for(const e of G.crown.engines){
+    if(!onScreen(e.x,e.y,e.radius+80))continue;
+    const color=Crownfall.chapters[e.index].color;
+    ctx.save();
+    if(e.state==='active'){
+      ctx.strokeStyle=color+'55';ctx.lineWidth=3;ctx.setLineDash([15,15]);
+      ctx.beginPath();ctx.arc(e.x,e.y,e.radius,0,Math.PI*2);ctx.stroke();ctx.setLineDash([]);
+      ctx.strokeStyle=color;ctx.lineWidth=5;ctx.beginPath();ctx.arc(e.x,e.y,77,-Math.PI/2,-Math.PI/2+Math.PI*2*(e.kills/e.target));ctx.stroke();
+    }
+    ctx.globalAlpha=e.state==='broken'?.28:e.state==='locked'?.52:1;
+    ctx.drawImage(crownEngineArt(e.index),e.x-102,e.y-153,204,187);
+    if(e.state==='active'){
+      ctx.fillStyle='#071b23';ctx.fillRect(e.x-42,e.y-160,84,6);
+      ctx.fillStyle=color;ctx.fillRect(e.x-42,e.y-160,84*e.kills/e.target,6);
+      for(let i=0;i<3;i++){ctx.fillStyle=i<G.crown.cleared?'#8ee4ba':'#33434c';ctx.fillRect(e.x-16+i*12,e.y+6,8,8);}
+    }
+    ctx.restore();
+  }
+}
+function renderCrownJournal() {
+  const run=G.crown,box=$('crown-journal');box.classList.toggle('hidden',!run);
+  if(!run)return;
+  box.innerHTML='<summary>RAID JOURNAL & STOLEN POWERS</summary><h3>THE CROWNFALL RAID</h3><p>Fight inside the marked engine ring. Defeat its keeper and return stolen souls by killing the horde. Keepers wear a bright crown aura.</p>'+
+    Crownfall.chapters.map((c,i)=>`<div class="journal-chapter ${i<=run.stage?'known':''}"><b>${i<run.cleared?'✓ ':''}${c.title}</b><p>${i<run.cleared?c.after:i===run.stage?c.story:'Follow the broken chain to uncover this chapter.'}</p></div>`).join('')+
+    '<h3>STOLEN POWERS</h3><p>'+ (run.boons.map(id=>{const b=Crownfall.boons.find(b=>b.id===id);return `<b>${b.name}</b> — ${b.desc}`;}).join('<br>')||'Destroy an engine to claim your first power.')+'</p>';
+}
+
 // ---------------- Expedition presentation & progression ----------------
 function encounterTime() {
+  if(G.crown)return Math.min(90,G.time*(G.session.mode==='blitz'?1.5:1))+G.crown.stage*55;
   return G.time * Expedition.mode(G.session && G.session.mode).pace;
 }
 function bindExpeditionSetup() {
@@ -5357,14 +5527,16 @@ function bindExpeditionSetup() {
 function updateSetupCopy() {
   const m = Expedition.mode(selectedMode), r = Expedition.route(selectedRoute), b = Expedition.blessing(selectedBlessing);
   $('run-setup-copy').textContent = `${b.desc}  ·  ${r.rule}`;
-  $('btn-start').textContent = selectedMode === 'blitz' ? 'GO BLITZ ›' : 'LET’S GO ›';
+  $('raid-brief').classList.toggle('hidden',selectedMode==='endless');
+  $('btn-start').textContent = selectedMode === 'blitz' ? 'GO BLITZ ›' : selectedMode === 'endless' ? 'SURVIVE ›' : 'BREAK THE CROWN ›';
   $('btn-start').title = m.desc;
 }
 function refreshHome() {
   const save = loadSave(), st = Expedition.migrate(save);
   $('home-wallet').textContent = `${(save.shells || 0).toLocaleString()} shells`;
+  const raid=Crownfall.migrate(save);
   $('home-progress').innerHTML = `<div><b>${save.unlocked.length}/24</b><span>Guardians unlocked</span></div>` +
-    `<div><b>${st.clears}</b><span>island clears</span></div><div><b>${st.contracts}</b><span>objectives earned</span></div>`;
+    `<div><b>${raid.wins}</b><span>crowns broken</span></div><div><b>${raid.boons.length}/6</b><span>powers discovered</span></div>`;
   if (save.lastHero !== undefined) $('btn-menu-continue').classList.remove('hidden');
   const best = (save.daily || {})[dayKey()];
   $('home-daily').textContent = best ? `Today’s best: ${best.toLocaleString()}` : 'One island. One shared challenge.';
@@ -5384,6 +5556,19 @@ function updateExpedition(dt) {
 }
 function updateExpeditionHud() {
   if (!G.session) return;
+  if(G.crown){
+    const run=G.crown,o=Crownfall.objective(run),e=run.engines[run.stage];
+    setHud('run-phase','t',G.boss?'KING GLOB · THE LAST CHAIN':o.title);
+    setHud('run-track-fill','w',Math.round(o.progress*100)+'%');
+    const outside=e&&Math.hypot(player.x-e.x,player.y-e.y)>e.radius;
+    setHud('run-objective','t',outside?'Follow ◆ · fight inside the ring':o.detail);
+    setHud('fury-label','t',run.rampage>0?`RAMPAGE ${Math.ceil(run.rampage)}s · RAPID BLASTS`:run.recovery>0?'FURY · catching breath':'FURY · chain kills');
+    setHud('fury-fill','w',(run.rampage>0?run.rampage/(run.boons.includes('overclock')?10:8)*100:run.fury).toFixed(1)+'%');
+    $('fury-meter').classList.toggle('rampage',run.rampage>0);
+    $('rally-hud').classList.toggle('hidden',G.session.rally<=0);
+    if(G.session.rally>0)setHud('rally-hud','t',`RALLY ${Math.ceil(G.session.rally)}s`);
+    return;
+  }
   const m = Expedition.mode(G.session.mode);
   const fraction = Math.min(1, G.time / G.nextBossAt);
   const phase = G.boss ? 'BOSS FIGHT' : fraction < 0.34 ? 'ASSEMBLE' : fraction < 0.76 ? 'POWER UP' : 'HOLD THE LINE';
@@ -5398,6 +5583,7 @@ function updateExpeditionHud() {
 }
 function renderContracts() {
   if (!G.session) return;
+  renderCrownJournal();
   const el = $('run-contracts');
   $('combat-log').textContent = (G.notices || []).join('\n');
   el.innerHTML = G.daily ? '<div class="contract"><b>Daily challenge</b><span>Fixed island · Shrine perks and blessings disabled</span></div>' :
@@ -5414,6 +5600,7 @@ function renderExpeditionRecap() {
     `${run.extracted ? 'Island liberated. Your squad made it home.' : G.victory ? 'A legendary stand against the horde.' : 'Rescue. Experiment. Come back stronger.'}` +
     (!G.daily ? `<div class="medal-row">${Expedition.contracts.map(c => `<span class="${run.completed.includes(c.id) ? 'earned' : ''}">${run.completed.includes(c.id) ? '★' : '☆'} ${c.name}</span>`).join('')}</div>` : '') +
     (run.evolved.length ? `<span>Evolved: ${run.evolved.join(' · ')}</span>` : '') + '</div></div>';
+  if(G.crown)$('expedition-recap').innerHTML+=`<div class="crown-coda"><b>${G.crown.cleared}/3 engines · ${G.crown.rampages} rampages · ${G.crown.boons.length} stolen powers</b><p>${G.victory?STORY.victory:STORY.defeat}</p></div>`;
 }
 function checkRelicEvolutions() {
   for (const r of relics) {
@@ -5490,6 +5677,7 @@ window.__balitopia = {
   cycleFormation, showMutatorDraft, showChest, computeScore, effWeapon, bodyY,
   loadSave, saveGame, flushSave, nextGoals, runContext, checkUnlocks, isUnlocked, battleTrack,
   applyQuality, coach, showModal, allyFalloff,
+  updateCrown, showCrownChoice,
   getQL: () => QL, viewInfo: () => ({ w: Math.round(viewW), h: Math.round(viewH), mul: +viewMul.toFixed(3) }),
   setQL: q => { QL = q; resize(); },
   prof: v => { PROF.on = v; PROF.acc = {}; PROF.n = 0; }, profData: profReport, heroState: () => heroState,

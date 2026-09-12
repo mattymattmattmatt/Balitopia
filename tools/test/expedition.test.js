@@ -39,10 +39,10 @@ test('the actual game loads an old save and writes the new version without losin
   const old = { v: 3, shells: 321, unlocked: ['bo', 'yelp'], mastery: { bo: 2 }, records: [{ score: 101 }], deep: {} };
   const h = harness({ balitopia: JSON.stringify(old) });
   const save = h.B.loadSave(); h.B.flushSave();
-  assert.equal(save.v, 4); assert.equal(save.shells, 321);
+  assert.equal(save.v, 5); assert.equal(save.shells, 321);
   assert.deepEqual(Array.from(save.unlocked), ['bo', 'yelp']);
   assert.equal(save.mastery.bo, 2); assert.equal(save.records[0].score, 101);
-  assert.equal(JSON.parse(h.storage.get('balitopia')).v, 4);
+  assert.equal(JSON.parse(h.storage.get('balitopia')).v, 5);
 });
 test('run setup actually changes boss timing, biome, health and experience', () => {
   const { B } = harness();
@@ -57,7 +57,7 @@ test('cage rescue is idempotent and the third rescue creates a bounded rally', (
   const { B } = harness(); B.newGame(0, 0); B.G.soul = 0;
   const cages = B.cages(); B.breakCage(cages[0]); B.breakCage(cages[0]);
   assert.equal(B.allies().length, 1); assert.equal(B.G.session.rescues, 1); assert.equal(B.G.soul, 1);
-  assert.equal(B.heroState()[cages[0].heroIdx].charge, 0.65);
+  assert.equal(B.heroState()[cages[0].heroIdx].charge, 1);
   B.breakCage(cages[1]); B.breakCage(cages[2]);
   assert.equal(B.G.session.rally, 8); assert.equal(B.G.soul, 3);
   B.updateExpedition(9); assert.equal(B.G.session.rally, 0);

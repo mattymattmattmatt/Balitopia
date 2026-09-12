@@ -3,10 +3,10 @@
 'use strict';
 const Expedition = (() => {
   const modes = [
-    { id: 'expedition', name: 'Expedition', length: '6 min + boss', bossAt: 360, pace: 1, xp: 1, score: 1,
-      desc: 'Build your squad. Defeat King Glob. Bring everyone home.' },
-    { id: 'blitz', name: 'Blitz', length: '3 min + boss', bossAt: 180, pace: 2, xp: 1.65, score: 0.8,
-      desc: 'Faster upgrades and a compressed assault. Every second counts.' },
+    { id: 'expedition', name: 'Crownfall', length: '3 engines + boss', bossAt: 360, pace: 1, xp: 1, score: 1,
+      desc: 'Overload three Crown Engines, steal their powers, and overthrow King Glob.' },
+    { id: 'blitz', name: 'Blitz', length: 'shorter raid', bossAt: 180, pace: 2, xp: 1.65, score: 0.8,
+      desc: 'Smaller engine quotas, faster upgrades and a compressed assault.' },
     { id: 'endless', name: 'Endless', length: 'No time limit', bossAt: 360, pace: 1, xp: 1, score: 1,
       desc: 'Alternating bosses and escalating curses. How far can you go?' },
   ];

@@ -714,6 +714,7 @@ const Sprites = (() => {
       get('burn' + r, () => statusBurn(r));
     }
     for (const a of ELITE_AFFIXES) get('elite_' + a.id, () => eliteRing(a.color));
+    get('elite_keeper', () => eliteRing('#ffdf8a'));
   }
 
   // Projectile sprites are made on demand and cached by (kind,color,size) —

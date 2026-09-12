@@ -5,14 +5,14 @@
 
 const STORY = {
   intro: [
-    `Far across the warm seas lies <em>Balitopia</em> — an island where the volcano sleeps politely, the surf is always up, and twenty-four <em>Guardians</em> keep the Balance of sun, sea, jungle and stone.`,
-    `Then the mountain burped. From a crack beneath Mount Karang crawled <em>King Glob</em>, the Hungry King — a wailing tyrant fused to a golden throne, who devours color, music, and everything in between. His horde spilled out ahead of him: the shuffling <em>Minyar</em> swarming the beaches in every cursed color, the horned <em>Demonders</em> stalking the jungle, and the colossal <em>Clubbos</em> flattening whole villages with one lazy swing.`,
-    `One by one the Guardians fell, sealed inside cursed bamboo cages and scattered across the island — their trapped magic drip-feeding the King's bottomless appetite.`,
-    `But cursed cages have one flaw the King never noticed: <em>they break from the outside.</em>`,
-    `One Guardian slipped the ambush. You. Break every cage. Every Guardian you free fights at your side — and their body is yours to possess with a touch. Gather your kin, drown the horde, and when the ground begins to shake... make the Hunger go hungry.`
+    `The night <em>King Glob</em> crowned himself, every fire on Balitopia turned cold. The harbour fell silent. By dawn, twenty-three Guardians hung in cages, their magic draining into three enormous <em>Crown Engines</em>. One cage was empty. Yours.`,
+    `Glob built his army from what he stole: Minyar from the island’s fear, Demonders from its anger, Clubbos from its broken stone. Every creature carries a little of your home inside it. Kill them near an engine and that power floods back into the machine. Feed it too much, and <em>it breaks.</em>`,
+    `<em>The Ember Kiln. The Drowned Choir. The Hollow Spire.</em> Each has a keeper. Each holds a stolen power you can turn against the king. Free Guardians along the way; every rescue gives you another fighter, another body to possess, another fully charged blast.`,
+    `The crown drinks slowly. You fight fast. Chain your kills into <em>Fury</em>, tear through the horde in a Rampage, and make the king’s machines choke on his own army.`,
+    `Break all three engines and Glob loses his last hiding place. Your squad is coming for the throne. Bring everyone you can. Leave the crown in pieces.`
   ],
-  victory: `King Glob's crown cracked first, then his throne, then his temper. The Hungry King wailed once and burst into a monsoon of stolen color that rained back over the island. The Guardians stood together on the black sand as the surf rolled in, gold again. Balitopia breathes. The Balance holds. (The volcano has promised to chew with its mouth closed from now on.)`,
-  defeat: `The tide took you gently, as it takes all things. But deep in the jungle, bamboo creaks... a cage strains... and somewhere a Guardian opens their eyes. Balitopia is not finished. Neither are you.`
+  victory: `The crown hits the ground before the king does. Stolen fire runs back to the hearths. The harbour remembers its songs. On the beach, your squad watches the mountain breathe. Tomorrow there will be rebuilding. Tonight, someone finally lights a fire.`,
+  defeat: `A freed Guardian carries your banner back through the smoke. You showed them the engines can break. The next raid begins with that knowledge. The island is still fighting.`
 };
 
 // ---------- Heroes ----------

@@ -1,5 +1,7 @@
 # Red splatter — build 4
 
+Build 6 retains these visuals and adds the Crownfall raid, Fury and stolen powers. See [CROWNFALL.md](CROWNFALL.md). Settings now shows **CROWNFALL · BUILD 6**.
+
 Build 5 retains these visuals and adds [impact and splatter audio](AUDIO_IMPACT.md).
 Its current Settings label is **IMPACT AUDIO · BUILD 5**.
 
