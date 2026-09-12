@@ -100,7 +100,7 @@ function harness(saved = {}, ports = {}) {
   };
   sandbox.window = sandbox;
   vm.createContext(sandbox);
-  const files = ['js/data.js', 'js/expedition.js', 'js/crownfall.js', 'js/gore.js', 'js/update.js'];
+  const files = ['js/data.js', 'js/frame-budget.js', 'js/expedition.js', 'js/crownfall.js', 'js/gore.js', 'js/update.js'];
   if (ports.makeCanvas) files.push('js/sprites.js');
   files.push('js/game.js');
   for (const file of files) {

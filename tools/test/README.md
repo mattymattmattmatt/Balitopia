@@ -47,3 +47,16 @@ Run-to-run variance is roughly ±3 fps, so the scripts take a median of three
 and single-digit differences between presets should not be read as signal.
 
 Install the existing Playwright dependency and its Chromium browser before running these browser suites. They use Playwright’s installed Chromium by default; set `CHROMIUM_PATH` only to use a custom browser executable.
+
+## Crowded-combat regression and comparison
+
+`performance.test.js` covers wall-clock quality control, actual frame caps,
+rainbow texture retention/eviction and enemy separation work. The gore suite
+also checks coalesced spray and preset-specific ground-paint budgets.
+
+`node tools/test/bench-combat.cjs --frames=600` runs deterministic stress scenes
+with no-op drawing ports. Add `--native` with `@napi-rs/canvas` on `NODE_PATH` to
+exercise real pixels, and `--case=rainbow`, `--case=horde` or `--case=mass-blasts`
+to select one case. Native timing includes a pixel readback to fence deferred
+work; it is not browser or phone FPS. `--snapshot=/absolute/path.png` optionally
+captures frame 7 outside the timed sample. See `PERFORMANCE.md` for limits.

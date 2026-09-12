@@ -670,6 +670,34 @@ const Sprites = (() => {
     return cache[key];
   }
 
+  // Rainbow orbiters used to retain a new gradient canvas per orb per frame,
+  // even across retries. Keep dynamic textures separate from permanent art.
+  const dynamic = new Map(), DYNAMIC_ENTRIES = 256, DYNAMIC_BYTES = 8 * 1024 * 1024;
+  let dynamicBytes = 0, dynamicCreated = 0, dynamicEvicted = 0;
+  function effectColor(color) {
+    const match = /^hsl\(\s*([-+\d.eE]+)\s*,\s*([\d.]+)%\s*,\s*([\d.]+)%\s*\)$/.exec(color);
+    if (!match) return color;
+    const hue = ((Number(match[1]) % 360) + 360) % 360;
+    return `hsl(${Math.floor(hue / 30) * 30},${Math.round(Number(match[2]))}%,${Math.round(Number(match[3]))}%)`;
+  }
+  function getDynamic(key, maker) {
+    const found = dynamic.get(key);
+    if (found) return found;
+    const image = maker(), bytes = image.width * image.height * 4;
+    dynamicCreated++;
+    while (dynamic.size && (dynamic.size >= DYNAMIC_ENTRIES || dynamicBytes + bytes > DYNAMIC_BYTES)) {
+      const oldest = dynamic.keys().next().value, retired = dynamic.get(oldest);
+      dynamicBytes -= retired.width * retired.height * 4;
+      dynamic.delete(oldest); retired.width = retired.height = 0; dynamicEvicted++;
+    }
+    if (bytes <= DYNAMIC_BYTES) { dynamic.set(key, image); dynamicBytes += bytes; }
+    return image;
+  }
+  function stats() {
+    return { dynamicEntries: dynamic.size, dynamicBytes, dynamicCreated, dynamicEvicted,
+      entryLimit: DYNAMIC_ENTRIES, byteLimit: DYNAMIC_BYTES };
+  }
+
   async function init() {
     // load real art in parallel (missing files resolve to null → fallbacks)
     const pLoads = HEROES.map((h, i) => loadImage(`assets/img/portraits/${h.id}.webp`).then(img => imgs.portraits[i] = img));
@@ -717,25 +745,23 @@ const Sprites = (() => {
     get('elite_keeper', () => eliteRing('#ffdf8a'));
   }
 
-  // Projectile sprites are made on demand and cached by (kind,color,size) —
-  // the set is small and bounded because size is bucketed to whole pixels.
+  // Whole-pixel sizes and twelve rainbow hues reuse the same textures.
   function proj(kind, color, size) {
     const s = Math.max(2, Math.round(size));
-    return get(`p_${kind}_${color}_${s}`, () => projSprite(kind, color, s));
+    color = effectColor(color);
+    return getDynamic(`p_${kind}_${color}_${s}`, () => projSprite(kind, color, s));
   }
   function statusFx(kind, r) {
     const b = Math.min(44, Math.max(12, Math.round(r / 4) * 4));
     return get(kind + b, () => (kind === 'poison' ? statusPoison : kind === 'frost' ? statusFrost : statusBurn)(b));
   }
-  // Colour-keyed VFX sprites, made on demand and cached. The set stays small
-  // because colours come from a fixed palette (hero accents + weapon colours).
-  const light = c => get('L_' + c, () => lightSprite(rgbOf(c)));
-  const ring  = c => get('R_' + c, () => ringSprite(rgbOf(c)));
-  const blast = c => get('B_' + c, () => blastSprite(rgbOf(c)));
-  const slash = c => get('S_' + c, () => slashSprite(rgbOf(c)));
-  const muzzle = c => get('M_' + c, () => muzzleSprite(rgbOf(c)));
+  const light = c => getDynamic('L_' + c, () => lightSprite(rgbOf(c)));
+  const ring  = c => getDynamic('R_' + c, () => ringSprite(rgbOf(c)));
+  const blast = c => getDynamic('B_' + c, () => blastSprite(rgbOf(c)));
+  const slash = c => getDynamic('S_' + c, () => slashSprite(rgbOf(c)));
+  const muzzle = c => getDynamic('M_' + c, () => muzzleSprite(rgbOf(c)));
   const smoke = () => get('smoke', smokeSprite);
 
   return { init, get, portrait, shade, proj, statusFx, groundTile,
-    light, ring, blast, slash, muzzle, smoke, rgbOf };
+    light, ring, blast, slash, muzzle, smoke, rgbOf, stats };
 })();
